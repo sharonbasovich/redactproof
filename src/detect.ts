@@ -271,3 +271,32 @@ export function detectSensitive(words: OcrWord[]): Detection[] {
   );
   return detections;
 }
+
+export interface OcrQuality {
+  wordCount: number;
+  meanConfidence: number; // 0-1
+  suspicious: boolean; // true when OCR output is too thin/fuzzy to trust
+}
+
+/**
+ * Sanity-check OCR output before showing a "nothing found" state: dark,
+ * low-resolution, or non-text images produce few words or low confidences,
+ * in which case "no detections" is unreliable.
+ */
+export function assessOcrQuality(words: OcrWord[]): OcrQuality {
+  const wordCount = words.length;
+  const meanConfidence = wordCount
+    ? words.reduce((s, w) => s + w.confidence, 0) / wordCount
+    : 0;
+  const suspicious = wordCount < 15 || meanConfidence < 0.55;
+  return { wordCount, meanConfidence, suspicious };
+}
+
+/** Accepted upload types (PDFs are rejected — render to PNG first). */
+export function isSupportedImageType(mime: string, fileName: string): boolean {
+  if (mime === "image/png" || mime === "image/jpeg") return true;
+  if (!mime || mime === "application/octet-stream") {
+    return /\.(png|jpe?g)$/i.test(fileName);
+  }
+  return false;
+}

@@ -1,5 +1,5 @@
 import "./style.css";
-import { detectSensitive } from "./detect";
+import { assessOcrQuality, detectSensitive, isSupportedImageType } from "./detect";
 import { recognize } from "./ocr";
 import { burnRedactions, canvasToPngBlob, sha256Hex } from "./redact";
 import { APP_VERSION, buildAuditReport, reportSummaryHtml, reportToJson } from "./report";
@@ -24,6 +24,7 @@ const els = {
   detList: $<HTMLUListElement>("#det-list"),
   detCount: $<HTMLSpanElement>("#det-count"),
   detEmpty: $<HTMLParagraphElement>("#det-empty"),
+  qualityWarn: $<HTMLDivElement>("#quality-warn"),
   redactBtn: $<HTMLButtonElement>("#redact-btn"),
   downloadBtn: $<HTMLButtonElement>("#download-btn"),
   cmpBefore: $<HTMLImageElement>("#cmp-before"),
@@ -242,6 +243,17 @@ async function scanImage() {
       updateSpinner(`Running OCR locally… ${Math.round(p * 100)}%`),
     );
     state.words = res.words;
+    const quality = assessOcrQuality(res.words);
+    if (quality.suspicious) {
+      els.qualityWarn.hidden = false;
+      els.qualityWarn.textContent =
+        `Low OCR confidence on this image (${quality.wordCount} words, ` +
+        `${Math.round(quality.meanConfidence * 100)}% avg). Dark or low-resolution ` +
+        `images can silently look clean — treat \u201cno detections\u201d as unreliable ` +
+        `and add boxes manually.`;
+    } else {
+      els.qualityWarn.hidden = true;
+    }
     const detections = detectSensitive(res.words);
     state.boxes = detections.map((d) => ({
       id: newBoxId(),
@@ -333,8 +345,10 @@ async function verifyExport() {
       banner.classList.remove("warn");
       banner.innerHTML =
         `<strong>Verification clean:</strong> no detectors fired on the exported pixels.` +
-        `<p class="sub">This is a check, not a guarantee — OCR can miss handwriting, ` +
-        `low-resolution text and unusual fonts. Eyeball the export before sharing.</p>`;
+        `<p class="sub">This only means the detectors found nothing — it is a check, ` +
+        `not proof all PII is gone. Detectors don't cover names, addresses, DOBs, ` +
+        `account/SIN/IBAN numbers, OTPs or non-NA phones, and OCR can miss handwriting ` +
+        `or low-resolution text. Eyeball the export before sharing.</p>`;
       status("Verification complete: no residual detections.");
     } else {
       banner.classList.add("warn");
@@ -455,6 +469,13 @@ els.stage.addEventListener("pointermove", (e) => {
   pendingEl.style.height = `${(y1 - y0) * scale}px`;
 });
 
+els.stage.addEventListener("pointercancel", () => {
+  dragStart = null;
+  pendingEl?.remove();
+  pendingEl = null;
+  els.stage.classList.remove("dragging");
+});
+
 els.stage.addEventListener("pointerup", (e) => {
   if (!dragStart) return;
   const cur = stagePoint(e);
@@ -514,9 +535,22 @@ els.dropzone.addEventListener("keydown", (e) => {
     els.fileInput.click();
   }
 });
+function tryLoad(file: Blob, name: string, mime: string) {
+  if (!isSupportedImageType(mime, name)) {
+    status(
+      `Unsupported file type (${mime || "unknown"}). Please upload a PNG or JPG — ` +
+        `PDFs aren't supported in this version; export the page to PNG first.`,
+    );
+    return;
+  }
+  loadImage(file, name).catch((err) =>
+    status(`Couldn't read that image: ${err instanceof Error ? err.message : String(err)}`),
+  );
+}
+
 els.fileInput.addEventListener("change", () => {
   const f = els.fileInput.files?.[0];
-  if (f) void loadImage(f, f.name);
+  if (f) tryLoad(f, f.name, f.type);
 });
 ["dragover", "dragenter"].forEach((ev) =>
   els.dropzone.addEventListener(ev, (e) => {
@@ -532,8 +566,7 @@ els.fileInput.addEventListener("change", () => {
 );
 els.dropzone.addEventListener("drop", (e) => {
   const f = e.dataTransfer?.files?.[0];
-  if (f && /image\/(png|jpeg)/.test(f.type)) void loadImage(f, f.name);
-  else status("Please provide a PNG or JPG image.");
+  if (f) tryLoad(f, f.name, f.type);
 });
 
 els.demoBtn.addEventListener("click", async () => {
@@ -541,7 +574,7 @@ els.demoBtn.addEventListener("click", async () => {
     const res = await fetch("demo.png");
     if (!res.ok) throw new Error("demo.png missing");
     const blob = await res.blob();
-    await loadImage(blob, "demo.png");
+    await loadImage(blob, "demo.png").catch((err) => status(String(err)));
   } catch (err) {
     status(`Demo load failed: ${err instanceof Error ? err.message : String(err)}`);
   }

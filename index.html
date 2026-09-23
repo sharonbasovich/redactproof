@@ -70,6 +70,13 @@
             Click a box to select it (Delete removes, D toggles). Drag on empty image to add a
             manual box. Uncheck items in the list to keep them.
           </p>
+          <p class="scope">
+            <strong>Detector scope:</strong> emails, North-American phones, payment cards (Luhn),
+            CA/US postal codes, SSNs, IPv4, JWT tokens. Detectors do <em>not</em> cover names,
+            addresses, DOBs, account/SIN/IBAN numbers, OTPs, or non-NA phone formats —
+            review the image yourself and drag boxes over anything missed.
+          </p>
+          <div id="quality-warn" class="quality-warn" hidden></div>
           <div class="work-area">
             <div class="stage-wrap">
               <div id="stage" class="stage" aria-label="Image with redaction boxes. Drag to add a manual redaction box.">

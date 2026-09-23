@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { detectSensitive, luhnCheck, knownCardPrefix, groupLines } from "../src/detect";
+import {
+  assessOcrQuality,
+  detectSensitive,
+  groupLines,
+  isSupportedImageType,
+  knownCardPrefix,
+  luhnCheck,
+} from "../src/detect";
 import type { OcrWord } from "../src/types";
 
 /** Build a single-line word stream like OCR would emit. */
@@ -126,5 +133,48 @@ describe("detectSensitive", () => {
     expect(card.wordIndices).toEqual([1, 2, 3, 4]);
     expect(card.bbox.x0).toBeLessThanOrEqual(ws[1].bbox.x0);
     expect(card.bbox.x1).toBeGreaterThanOrEqual(ws[4].bbox.x1);
+  });
+});
+
+describe("assessOcrQuality", () => {
+  const mk = (n: number, conf: number): OcrWord[] =>
+    Array.from({ length: n }, (_, i) => ({
+      text: `w${i}`,
+      confidence: conf,
+      bbox: { x0: i * 20, y0: 0, x1: i * 20 + 10, y1: 10 },
+    }));
+
+  it("flags too-little-text output as suspicious", () => {
+    expect(assessOcrQuality(mk(5, 0.9)).suspicious).toBe(true);
+    expect(assessOcrQuality([]).suspicious).toBe(true);
+  });
+
+  it("flags low-confidence output as suspicious", () => {
+    expect(assessOcrQuality(mk(50, 0.3)).suspicious).toBe(true);
+  });
+
+  it("accepts healthy OCR output", () => {
+    const q = assessOcrQuality(mk(50, 0.9));
+    expect(q.suspicious).toBe(false);
+    expect(q.wordCount).toBe(50);
+    expect(q.meanConfidence).toBeCloseTo(0.9);
+  });
+});
+
+describe("isSupportedImageType", () => {
+  it("accepts PNG and JPEG", () => {
+    expect(isSupportedImageType("image/png", "a.png")).toBe(true);
+    expect(isSupportedImageType("image/jpeg", "a.jpg")).toBe(true);
+  });
+
+  it("rejects PDF and other types", () => {
+    expect(isSupportedImageType("application/pdf", "scan.pdf")).toBe(false);
+    expect(isSupportedImageType("image/gif", "a.gif")).toBe(false);
+    expect(isSupportedImageType("text/plain", "a.txt")).toBe(false);
+  });
+
+  it("falls back to extension for octet-stream", () => {
+    expect(isSupportedImageType("application/octet-stream", "shot.png")).toBe(true);
+    expect(isSupportedImageType("application/octet-stream", "doc.pdf")).toBe(false);
   });
 });

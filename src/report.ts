@@ -3,10 +3,13 @@ import type { AuditReport, RedactionBox, VerificationHit } from "./types";
 export const APP_VERSION = "0.1.0";
 
 export const DISCLAIMER =
-  "A clean verification scan is not a guarantee of perfect redaction. " +
-  "OCR can miss handwriting, low-resolution or distorted text, unusual fonts, " +
-  "and data embedded in ways no detector covers. This tool does not provide " +
-  "cryptographic proof of PII absence. Always review the exported image " +
+  "A clean verification scan only means the built-in detectors found nothing " +
+  "in the exported pixels — it is not a guarantee of perfect redaction and not " +
+  "cryptographic proof of PII absence. Detectors cover emails, North-American " +
+  "phones, payment cards (Luhn), CA/US postal codes, SSNs, IPv4 addresses and " +
+  "JWT-shaped tokens only; names, addresses, dates of birth, account/SIN/IBAN " +
+  "numbers, OTP codes and non-NA phone formats are not covered, and OCR can " +
+  "miss handwriting or low-resolution text. Always review the exported image " +
   "visually before sharing it.";
 
 export function buildAuditReport(args: {
