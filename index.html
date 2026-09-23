@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>RedactProof — redact, verify, prove</title>
+    <meta
+      name="description"
+      content="Local-first screenshot redaction with post-export verification. All processing happens in your browser."
+    />
+  </head>
+  <body>
+    <div id="app">
+      <header class="site-header">
+        <div class="brand">
+          <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
+            <rect x="2" y="4" width="28" height="24" rx="4" fill="none" stroke="currentColor" stroke-width="2"/>
+            <rect x="7" y="9" width="12" height="4" fill="currentColor"/>
+            <rect x="7" y="16" width="18" height="4" fill="currentColor" opacity="0.5"/>
+            <path d="M20 24l3 3 5-6" stroke="#4ade80" stroke-width="2" fill="none" stroke-linecap="round"/>
+          </svg>
+          <div>
+            <h1>RedactProof</h1>
+            <p class="tagline">Redact it. Then prove you checked.</p>
+          </div>
+        </div>
+        <span class="pill" title="No uploads, no servers, no API keys">100% local &middot; no data leaves this tab</span>
+      </header>
+
+      <main>
+        <ol class="steps" aria-label="Workflow">
+          <li class="step is-active" data-step="upload">Upload</li>
+          <li class="step" data-step="review">Scan &amp; review</li>
+          <li class="step" data-step="export">Redact &amp; export</li>
+          <li class="step" data-step="verify">Verify &amp; report</li>
+        </ol>
+
+        <section id="upload-section" class="card">
+          <div
+            id="dropzone"
+            class="dropzone"
+            role="button"
+            tabindex="0"
+            aria-label="Upload a screenshot to redact"
+          >
+            <svg viewBox="0 0 24 24" class="drop-icon" aria-hidden="true">
+              <path d="M12 16V4m0 0l-4 4m4-4l4 4" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>
+            </svg>
+            <p><strong>Drop a PNG or JPG</strong> here, or click to choose</p>
+            <p class="muted">Nothing is uploaded — the file is read by your browser only.</p>
+            <input id="file-input" type="file" accept="image/png,image/jpeg" hidden />
+          </div>
+          <div class="demo-row">
+            <button id="demo-btn" class="btn ghost" type="button">Try the synthetic demo screenshot</button>
+            <span class="muted">demo data is 100% fake</span>
+          </div>
+        </section>
+
+        <section id="review-section" class="card" hidden>
+          <div class="card-head">
+            <h2>Scan &amp; review</h2>
+            <div class="card-actions">
+              <button id="redact-btn" class="btn primary" type="button" disabled>Redact &amp; export PNG</button>
+              <button id="reset-btn-1" class="btn ghost" type="button">Start over</button>
+            </div>
+          </div>
+          <p class="hint">
+            Click a box to select it (Delete removes, D toggles). Drag on empty image to add a
+            manual box. Uncheck items in the list to keep them.
+          </p>
+          <div class="work-area">
+            <div class="stage-wrap">
+              <div id="stage" class="stage" aria-label="Image with redaction boxes. Drag to add a manual redaction box.">
+                <img id="before-img" alt="Uploaded screenshot under review" />
+                <div id="boxes-layer"></div>
+              </div>
+            </div>
+            <aside class="panel" aria-label="Detected items">
+              <h3>Detections <span id="det-count" class="count-chip">0</span></h3>
+              <ul id="det-list" class="det-list"></ul>
+              <p id="det-empty" class="muted" hidden>No items detected. You can still add boxes manually.</p>
+            </aside>
+          </div>
+        </section>
+
+        <section id="export-section" class="card" hidden>
+          <div class="card-head">
+            <h2>Result</h2>
+            <div class="card-actions">
+              <button id="download-btn" class="btn primary" type="button">Download redacted PNG</button>
+              <button id="reset-btn-2" class="btn ghost" type="button">Start over</button>
+            </div>
+          </div>
+          <div class="compare">
+            <figure>
+              <figcaption>Before</figcaption>
+              <img id="cmp-before" alt="Original screenshot with sensitive data visible" />
+            </figure>
+            <figure>
+              <figcaption>After (export)</figcaption>
+              <div id="after-stage" class="stage">
+                <img id="after-img" alt="Redacted export" />
+                <div id="hits-layer"></div>
+              </div>
+            </figure>
+          </div>
+          <div id="verify-banner" class="verify-banner" hidden></div>
+          <div id="report-card" class="report-card" hidden>
+            <h3>Audit report</h3>
+            <div id="report-body"></div>
+            <div class="card-actions">
+              <button id="report-json-btn" class="btn" type="button">Download JSON</button>
+              <button id="report-print-btn" class="btn" type="button">Print report</button>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <p>
+          Verification is OCR-based: a clean scan is <em>not</em> a guarantee of perfect redaction.
+          Always eyeball the export before sharing.
+        </p>
+      </footer>
+    </div>
+    <div id="status" class="sr-status" role="status" aria-live="polite"></div>
+    <div id="spinner" class="spinner" hidden>
+      <div class="spinner-box"><div class="spin"></div><p id="spinner-text">Working…</p></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

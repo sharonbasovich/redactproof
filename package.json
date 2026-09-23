@@ -1,0 +1,32 @@
+{
+  "name": "redactproof",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first screenshot redaction with post-export verification. All processing happens in your browser.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "vendor": "bash scripts/vendor.sh",
+    "predev": "bash scripts/vendor.sh",
+    "prebuild": "bash scripts/vendor.sh",
+    "fixtures": "python3 scripts/make_fixtures.py"
+  },
+  "dependencies": {
+    "tesseract.js": "5.1.1"
+  },
+  "devDependencies": {
+    "@tesseract.js-data/eng": "^1.0.0",
+    "@types/node": "20.16.10",
+    "@types/pngjs": "^6.0.5",
+    "pngjs": "^7.0.0",
+    "tesseract.js-core": "^5.1.1",
+    "typescript": "5.6.3",
+    "vite": "5.4.8",
+    "vitest": "2.1.2"
+  }
+}
