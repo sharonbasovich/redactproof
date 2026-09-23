@@ -7,7 +7,8 @@ screenshots and scans — and, crucially, *checking the exported pixels afterwar
 Most redaction mishaps happen because a translucent highlight, an annotation
 layer, or a missed field leaves the data recoverable. RedactProof burns opaque
 pixels into a fresh canvas and then re-runs its own OCR + detectors on the
-export, so a leaked field shows up before you ship the image.
+export, so residual matches within its supported patterns can surface before
+you share the image.
 
 Built for the **InfinityX Global Hackathon 2K26**. Team: Sharon & Terry.
 
