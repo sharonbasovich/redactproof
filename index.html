@@ -9,8 +9,8 @@
       name="description"
       content="Local-first screenshot redaction with post-export verification. All processing happens in your browser."
     />
-    <script type="module" crossorigin src="./assets/index-zjM98cGN.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-DMC6oZr6.css">
+    <script type="module" crossorigin src="./assets/index-D4bqoHrW.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-lk6YH3Gy.css">
   </head>
   <body>
     <div id="app">
@@ -72,6 +72,13 @@
             Click a box to select it (Delete removes, D toggles). Drag on empty image to add a
             manual box. Uncheck items in the list to keep them.
           </p>
+          <p class="scope">
+            <strong>Detector scope:</strong> emails, North-American phones, payment cards (Luhn),
+            CA/US postal codes, SSNs, IPv4, JWT tokens. Detectors do <em>not</em> cover names,
+            addresses, DOBs, account/SIN/IBAN numbers, OTPs, or non-NA phone formats —
+            review the image yourself and drag boxes over anything missed.
+          </p>
+          <div id="quality-warn" class="quality-warn" hidden></div>
           <div class="work-area">
             <div class="stage-wrap">
               <div id="stage" class="stage" aria-label="Image with redaction boxes. Drag to add a manual redaction box.">
