@@ -21,7 +21,7 @@ def font(size: int) -> ImageFont.FreeTypeFont:
 
 
 def build() -> Image.Image:
-    W, H = 1100, 640
+    W, H = 1100, 740
     img = Image.new("RGB", (W, H), "#f7f8fa")
     d = ImageDraw.Draw(img)
     f_head = font(26)
@@ -51,12 +51,18 @@ def build() -> Image.Image:
         "Postal code: M5V 3L9",
         "Gov ID on file: 078-05-1120 (Woolworth test SSN)",
         "Gateway IP: 203.0.113.42",
-        "Session token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJkZW1vIn0.SflKxwRJSMeKKF2QT4fwpMeJ",
     ]
     y = 150
     for ln in lines:
         d.text((248, y), ln, font=f, fill="#22303d")
         y += 38
+
+    # JWT rendered in a monospace "code chip" for legibility — still fake
+    mono = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", 27)
+    d.text((248, y), "Session token:", font=f, fill="#22303d")
+    d.rounded_rectangle([248, y + 30, 248 + 800, y + 72], radius=6, fill="#ffffff", outline="#c9d2dc")
+    d.text((262, y + 38), "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJkZW1vIn0.SflKxwRJSMeKKF2QT4", font=mono, fill="#000000")
+    y += 86
 
     # a couple of non-sensitive lines to prove detectors don't over-fire
     y += 10

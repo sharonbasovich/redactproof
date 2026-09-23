@@ -48,7 +48,7 @@ describe("fixture end-to-end", () => {
       expect(first.words.length).toBeGreaterThan(50);
       const detections = detectSensitive(first.words);
       const categories = new Set(detections.map((d) => d.category));
-      const expected: DetectorCategory[] = ["email", "phone", "payment-card", "postal-code", "ssn", "ipv4"];
+      const expected: DetectorCategory[] = ["email", "phone", "payment-card", "postal-code", "ssn", "ipv4", "jwt"];
       for (const cat of expected) {
         if (!categories.has(cat)) throw new Error(`expected a ${cat} detection, got ${[...categories]}`);
       }
