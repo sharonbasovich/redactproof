@@ -107,6 +107,15 @@ export interface VerifyReport {
     };
   };
   /**
+   * Set when this report describes a re-check of a file the user just
+   * metadata-stripped in-app: provenance back to the file that carried the
+   * metadata. `removed` lists metadata kinds/chunk names only — no values.
+   */
+  metadataStrip?: {
+    fromSha256: string;
+    removed: string[];
+  };
+  /**
    * Set when this report describes a re-check of a file the user just fixed
    * in-app: provenance chain from the flagged image to the burned export.
    */

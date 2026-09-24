@@ -116,6 +116,7 @@ export function buildVerifyReport(args: {
     bytesStripped: number | null;
   };
   fix?: { fromSha256: string; boxesBurned: number; priorStatus: VerifyStatus; priorHits: number };
+  metadataStrip?: { fromSha256: string; removed: string[] };
   now?: Date;
 }): VerifyReport {
   return {
@@ -147,6 +148,7 @@ export function buildVerifyReport(args: {
       ...(args.metadata ? { metadata: args.metadata } : {}),
     },
     ...(args.fix ? { fix: args.fix } : {}),
+    ...(args.metadataStrip ? { metadataStrip: args.metadataStrip } : {}),
     detectorScope: DETECTOR_SCOPE,
     limitations: VERIFY_LIMITATIONS,
   };
@@ -177,6 +179,11 @@ export function verifySummaryHtml(report: VerifyReport): string {
   const hitsTable = report.check.hits.length
     ? `<table class="report-table"><thead><tr><th>Category</th><th>Rule</th><th>Conf</th><th>Found by</th></tr></thead><tbody>${rows}</tbody></table>`
     : `<p class="muted">No detector hits.</p>`;
+  const stripRow = report.metadataStrip
+    ? `<dt>Metadata stripped</dt><dd>re-encoded from sha ${esc(
+        report.metadataStrip.fromSha256.slice(0, 16),
+      )}… (removed: ${esc(report.metadataStrip.removed.join(", "))})</dd>`
+    : "";
   const fixRow = report.fix
     ? `<dt>Fix provenance</dt><dd>${report.fix.boxesBurned} opaque box${
         report.fix.boxesBurned === 1 ? "" : "es"
@@ -220,11 +227,16 @@ export function verifySummaryHtml(report: VerifyReport): string {
       )}</dd>
       <dt>Engine</dt><dd>${esc(report.check.engine)}</dd>
       <dt>Attack variants</dt><dd>${esc(report.check.attacksRun.join(" → "))}</dd>
-      <dt>OCR quality</dt><dd>${report.check.ocrWords} words, ${Math.round(
-        report.check.ocrMeanConfidence * 100,
-      )}% avg confidence${report.check.lowOcrConfidence ? " — low" : ""}</dd>
+      <dt>OCR quality</dt><dd>${
+        report.check.residualHits > 0
+          ? "not assessed separately — hits prove OCR functioned"
+          : `${report.check.ocrWords} words, ${Math.round(
+              report.check.ocrMeanConfidence * 100,
+            )}% avg confidence${report.check.lowOcrConfidence ? " — low" : ""}`
+      }</dd>
       <dt>Residual hits</dt><dd>${report.check.residualHits}</dd>
       ${mdRow}
+      ${stripRow}
       ${fixRow}
     </dl>
     ${hitsTable}

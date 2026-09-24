@@ -136,6 +136,8 @@ interface VerifyState {
   metadata: MetadataCheck | null;
   /** What metadata a just-stripped file used to carry (provenance note). */
   priorStrip: string | null;
+  /** Structured strip provenance for the re-check audit. */
+  priorStripMeta: { fromSha256: string; removed: string[] } | null;
 }
 
 const vstate: VerifyState = {
@@ -151,6 +153,7 @@ const vstate: VerifyState = {
   revealed: new Set(),
   metadata: null,
   priorStrip: null,
+  priorStripMeta: null,
 };
 
 /** Images above this many pixels are refused up front (rasterization is 4B/px). */
@@ -578,6 +581,7 @@ async function loadVerifyImage(file: Blob, internal = false) {
     // a fresh user upload has no fix/strip provenance — clear any left over
     vstate.priorFix = null;
     vstate.priorStrip = null;
+    vstate.priorStripMeta = null;
   }
   const img = els.verifyImg;
   await new Promise<void>((resolve, reject) => {
@@ -673,6 +677,7 @@ async function runVerify() {
               priorHits: vstate.report.check.residualHits,
             }
           : undefined,
+      metadataStrip: vstate.priorStripMeta ?? undefined,
     });
 
     els.uploadSection.hidden = true;
@@ -773,7 +778,13 @@ function maskText(t: string): string {
 
 /** One-line summary of residual container metadata, or null when clean. */
 function metadataLeakSummary(md: MetadataCheck): string | null {
-  const parts = [
+  const parts = metadataLeakKinds(md);
+  return parts.length ? parts.join(", ") : null;
+}
+
+/** Metadata kinds present, as short labels (chunk names, never values). */
+function metadataLeakKinds(md: MetadataCheck): string[] {
+  return [
     md.hasGps ? "GPS (EXIF)" : "",
     md.hasExif && !md.hasGps ? "EXIF" : "",
     md.hasXmp ? "XMP" : "",
@@ -781,7 +792,6 @@ function metadataLeakSummary(md: MetadataCheck): string | null {
       ? `PNG text chunks (${md.pngTextChunks.join(", ")})`
       : "",
   ].filter(Boolean);
-  return parts.length ? parts.join(", ") : null;
 }
 
 /**
@@ -804,6 +814,10 @@ async function stripMetadata() {
     const blob = await canvasToPngBlob(canvas);
     vstate.fixedPng = new Uint8Array(await blob.arrayBuffer());
     vstate.priorStrip = metadataLeakSummary(md);
+    vstate.priorStripMeta = {
+      fromSha256: vstate.imageSha!,
+      removed: metadataLeakKinds(md),
+    };
     status("Metadata stripped. Re-checking the clean output…");
     await loadVerifyImage(blob, true);
   } catch (err) {
@@ -961,6 +975,7 @@ function resetVerify() {
   vstate.revealed.clear();
   vstate.metadata = null;
   vstate.priorStrip = null;
+  vstate.priorStripMeta = null;
   els.verifySection.hidden = true;
   els.verifyBannerEl.hidden = true;
   els.verifyGradeEl.hidden = true;
