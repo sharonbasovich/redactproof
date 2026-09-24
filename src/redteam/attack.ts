@@ -79,32 +79,78 @@ function percentile(hist: Uint32Array, count: number, p: number): number {
 }
 
 /**
- * Luminance percentile stretch: remap the [p2, p98] luma range to 0-255
- * and force alpha opaque. Recovers text hidden under translucent dark
- * overlays (the "black marker at 60% opacity" failure mode).
+ * Local-background flatten + percentile stretch.
+ *
+ * A global contrast stretch is not enough for marker recovery: a
+ * translucent black band leaves the text darker than the band but the
+ * band itself mid-gray, and tesseract's Otsu binarization then treats
+ * the whole band as black. Dividing each pixel's luma by a box-blurred
+ * local background (radius much larger than a stroke, smaller than a
+ * marker band) turns the band white and keeps the strokes dark —
+ * "high-pass" normalization. A final [p2, p98] stretch restores global
+ * contrast. Radius scales with the image and is clamped to [8, 24]px.
  */
 function levelsStretch(src: Raster, mask: RegionMask | null): Raster {
-  const lum = new Uint8Array(src.width * src.height);
+  const { width: w, height: h } = src;
+  const n = w * h;
+  const lum = new Float32Array(n);
+  for (let i = 0; i < n; i++) lum[i] = luma(src.data, i * 4);
+
+  const radius = Math.max(8, Math.min(24, Math.round(Math.min(w, h) * 0.03)));
+  const bg = boxBlur(lum, w, h, radius);
+
+  const flat = new Uint8Array(n);
   const hist = new Uint32Array(256);
   let count = 0;
+  const norm = new Uint8ClampedArray(n); // clamps the divide at 255
+  for (let i = 0; i < n; i++) norm[i] = (255 * lum[i]) / Math.max(1, bg[i]);
   for (const o of maskedOffsets(src, mask)) {
-    const l = Math.round(luma(src.data, o));
-    lum[o / 4] = l;
-    hist[l]++;
+    const v = norm[o / 4];
+    flat[o / 4] = v;
+    hist[v]++;
     count++;
   }
   const lo = percentile(hist, count, 0.02);
   const hi = percentile(hist, count, 0.98);
   const range = Math.max(1, hi - lo);
-
   const lut = new Uint8ClampedArray(256);
   for (let v = 0; v < 256; v++) lut[v] = ((v - lo) / range) * 255;
 
   const out = cloneRaster(src);
   for (const o of maskedOffsets(src, mask)) {
-    const v = lut[lum[o / 4]];
+    const v = lut[flat[o / 4]];
     out.data[o] = out.data[o + 1] = out.data[o + 2] = v;
     out.data[o + 3] = 255;
+  }
+  return out;
+}
+
+/** Separable box blur on a Float32 single-channel image, O(n) per pass. */
+function boxBlur(src: Float32Array, w: number, h: number, r: number): Float32Array {
+  const tmp = new Float32Array(w * h);
+  const out = new Float32Array(w * h);
+  // horizontal
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    let sum = 0;
+    for (let x = -r; x <= r; x++) sum += src[row + Math.min(w - 1, Math.max(0, x))];
+    for (let x = 0; x < w; x++) {
+      tmp[row + x] = sum / (2 * r + 1);
+      const xAdd = Math.min(w - 1, x + r + 1);
+      const xSub = Math.max(0, x - r);
+      sum += src[row + xAdd] - src[row + xSub];
+    }
+  }
+  // vertical
+  for (let x = 0; x < w; x++) {
+    let sum = 0;
+    for (let y = -r; y <= r; y++) sum += tmp[Math.min(h - 1, Math.max(0, y)) * w + x];
+    for (let y = 0; y < h; y++) {
+      out[y * w + x] = sum / (2 * r + 1);
+      const yAdd = Math.min(h - 1, y + r + 1);
+      const ySub = Math.max(0, y - r);
+      sum += tmp[yAdd * w + x] - tmp[ySub * w + x];
+    }
   }
   return out;
 }

@@ -88,8 +88,10 @@ def yellow_marker(img: Image.Image) -> Image.Image:
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(overlay)
     for i in range(len(LINES)):
-        # opaque saturated yellow — suppresses the blue channel entirely
-        d.rectangle(line_box(i), fill=(255, 235, 0, 255))
+        # translucent saturated yellow — a real highlighter keeps the
+        # strokes (mostly) but kills the blue channel, which is what
+        # channel-max exists to defeat
+        d.rectangle(line_box(i), fill=(255, 235, 0, 150))
     return Image.alpha_composite(img, overlay).convert("RGB")
 
 
