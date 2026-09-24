@@ -52,7 +52,6 @@ export interface AuditReport {
   toolVersion: string;
   generatedAt: string; // ISO 8601
   input: {
-    fileName: string;
     pixelWidth: number;
     pixelHeight: number;
   };

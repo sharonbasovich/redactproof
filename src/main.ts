@@ -327,7 +327,6 @@ async function verifyExport() {
     renderHits();
 
     state.report = buildAuditReport({
-      inputFileName: state.fileName,
       inputWidth: els.beforeImg.naturalWidth,
       inputHeight: els.beforeImg.naturalHeight,
       outputSha256: state.exportSha,

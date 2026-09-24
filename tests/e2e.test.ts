@@ -74,7 +74,6 @@ describe("fixture end-to-end", () => {
         source: "detector",
       }));
       const report = buildAuditReport({
-        inputFileName: "support-ticket.png",
         inputWidth: png.width,
         inputHeight: png.height,
         outputSha256: "0".repeat(64),
@@ -94,6 +93,9 @@ describe("fixture end-to-end", () => {
         "078-05-1120",
         "M5V",
         "203.0.113.42",
+        // a sensitive upload filename must never reach the report
+        "support-ticket.png",
+        "fileName",
       ]) {
         expect(json).not.toContain(pii);
       }

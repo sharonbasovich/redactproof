@@ -10,7 +10,7 @@ pixels into a fresh canvas and then re-runs its own OCR + detectors on the
 export, so residual matches within its supported patterns can surface before
 you share the image.
 
-Built for the **InfinityX Global Hackathon 2K26**. Team: Sharon & Terry.
+Built for the **InfinityX Global Hackathon 2K26**.
 
 ## The flow
 
@@ -24,9 +24,10 @@ Built for the **InfinityX Global Hackathon 2K26**. Team: Sharon & Terry.
    rectangles onto a *brand-new canvas*. There is no reversible overlay and the
    exported PNG carries no source metadata.
 4. **Verify & report** — the exported pixels are re-OCR'd and re-scanned. Any
-   residual detector hit is highlighted on the export. A content-free audit
+   residual detector hit is highlighted on the export. A minimal-content audit
    report (JSON + printable) records the output's SHA-256, detection counts by
-   category, app version, and timestamp — never the detected text.
+   category, app version, and timestamp — detected strings and the input
+   filename are omitted by design.
 
 ## Honest limitations — read this before trusting it
 
@@ -47,8 +48,12 @@ Built for the **InfinityX Global Hackathon 2K26**. Team: Sharon & Terry.
 - Everything runs client-side. There is no backend, no analytics, no network
   call at runtime — the tesseract worker, WASM core, and language data are
   vendored into `public/` (`npm run vendor`).
-- The audit report is content-free by contract: it contains counts, categories,
-  bounding boxes, the output SHA-256, version and time — never detected strings.
+- The audit report omits detected strings by contract: it contains counts,
+  categories, bounding boxes, the output SHA-256, version and time — never
+  detected strings, and never the original filename (which can itself contain
+  PII). We say "omits detected text", not "contains no personal information" —
+  a filename or a metadata field could still say something about you if we
+  ever added one, so the report is kept minimal instead of trusted blindly.
 - The original file never leaves the page; exports are generated in-memory.
 
 ## Architecture
@@ -60,7 +65,7 @@ src/
               dedup, bbox union — no DOM, fully unit-testable
   ocr.ts      tesseract.js wrapper; shared worker; vendored WASM/lang assets
   redact.ts   burnRedactions() (fresh canvas, opaque fill) + SHA-256 helpers
-  report.ts   content-free audit report builder (JSON + printable HTML)
+  report.ts   minimal-content audit report builder (JSON + printable HTML)
   main.ts     UI orchestration: upload, review overlay, manual boxes, export,
               verification pass, report rendering
 tests/
