@@ -13,13 +13,22 @@ RedactProof is a local-first screenshot-redaction demo (vanilla TS + vite + tess
 - `npm run preview` serves the built `dist/` on `http://localhost:4173`. Run `npm run build` first if dist might be stale (build also runs `scripts/vendor.sh` to re-vendor tesseract assets).
 - `npm test` = vitest (22 unit + 1 real-OCR pixel e2e, ~2s).
 
-## Golden-path demo flow
+## Golden-path demo flow (Path A)
 
 1. Landing: click **"Try the synthetic demo screenshot"** (`#demo-btn`) → fetches same-origin `demo.png` → OCR spinner → Scan & review.
-2. Expected on the synthetic demo: **9 detections** — Email×2, Phone, Payment card×2, Postal code×2 (us-zip4 + ca-postal), SSN, IP address. The seeded JWT is **not** detected (OCR misreads the token string, breaking the `eyJ…` regex) — a known OCR-fidelity gap, also absent from the repo's own e2e expectations.
+2. Expected on the synthetic demo: **10 detections** — Email×2, Phone, Payment card×2, Postal code×2 (us-zip4 + ca-postal), SSN, IP address, Token (JWT). Detection count can vary ±1 with OCR fidelity (the JWT chip is borderline ~40% conf; earlier builds missed it entirely).
 3. Interactions: click a `.box` div to select; `Delete`/`Backspace` removes it; `D` toggles enabled; pointer-drag on empty image area adds a `Manual` box (min 6px); sidebar checkboxes toggle enabled. `#det-count` shows enabled count only.
 4. **"Redact & export PNG"** burns opaque black rects, then re-OCRs the export. Disabled/deleted boxes leave PII visible → warn banner `N residual hits` with outlined regions (this is the honest expected result if you disabled items). Clean banner text: `Verification clean:`.
 5. Audit report: SHA-256, box counts by category, disclaimer. Downloads land in `~/Downloads`: `redacted-<name>.png`, `redactproof-audit-<sha8>.json`. `sha256sum` of the PNG should equal the report's `output.sha256`.
+
+## Red-team audit flow (Path B, real engine `src/redteam/*`)
+
+1. Landing: the right card is **"Red-team an existing image"**. The `#deep-scan` checkbox (**"All 7 attack variants"**) is **checked by default** — leave it on for the full pass. Click **"Try the marker-covered demo"** (`#verify-demo-btn`) → fetches same-origin `demo-redteam.png` (== `fixtures/redteam/marker-55.png`, 980×560, sha256 `e9421db4b73eea…`; six PII lines under a ~55%-opacity black marker).
+2. Spinner shows `Attack <id>… n/7` cycling identity → levels-stretch → gamma-lift → gamma-drop → invert → channel-max → upscale-sharpen (~10-20s total on this fixture; the OCR worker is shared/single-threaded so variants run sequentially).
+3. Expected result on marker-55: **grade C** with "N hits recoverable only after image enhancement" + "Categories recovered:" reasons, warn banner "6 recoverable patterns", 6 hits — one per planted line (email, phone, payment-card, ssn, postal-code, ipv4). **Every hit's chips must show only enhancement ids (levels-stretch on this fixture) — an `identity` chip means the baseline could read the marker, which contradicts grade C.** Hit rows show masked bullets (`•••`) with a reveal/hide toggle — the recovered text is real OCR output (e.g. `alice@example.com`), never persisted.
+4. Audit card rows: `980×560px (filename omitted)`, sha `e9421db4…`, engine `redteam-engine`, all 7 variants joined by `→`, a `Container metadata` row (`None detected…` for this fixture — it has only IHDR/IDAT/IEND), residual hits count.
+5. **"Fix it — burn opaque boxes & re-check"** burns padded opaque boxes over the hit bboxes, then re-runs ALL 7 variants on the fixed pixels. Expected: grade **A** ("No sensitive content recovered by any attack pass."), 0 residual hits, fix panel with Flagged file / Burned export images, `Fix provenance` row chaining `sha e9421db4…`, new image sha. `redactproof-fixed-<sha8>.png` downloads to `~/Downloads` (real PNG, verify with `file`).
+6. Gotcha: after the fix, the banner/Status may read **"Inconclusive (low OCR confidence)"** instead of "Not flagged"/"No detector hits". `assessOcrQuality` marks `suspicious` when the re-OCR sees <15 words, and the fixed fixture has only ~6 words left. This is deliberate conservatism, not a bug — grade A is the verdict to assert.
 
 ## Local-only verification
 
