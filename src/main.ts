@@ -1,16 +1,16 @@
 import "./style.css";
-import { assessOcrQuality, detectSensitive, isSupportedImageType } from "./detect";
-import { recognize } from "./ocr";
-import type { RgbaImage } from "./preprocess";
-import { burnRedactions, canvasToPngBlob, sha256Hex } from "./redact";
-// Engine seam: when the attack engine lands (src/redteam/*), these imports
-// repoint at it and this file's logic stays unchanged.
 import {
-  grade as attackGrade,
-  runAttacks,
-  type AttackRunResult,
-  type Raster,
-} from "./redteam-mock";
+  assessOcrQuality,
+  detectSensitive,
+  isSupportedImageType,
+  type OcrQuality,
+} from "./detect";
+import { recognize } from "./ocr";
+import { burnRedactions, canvasToPngBlob, sha256Hex } from "./redact";
+import { runAttacks } from "./redteam/attack";
+import { grade as attackGrade } from "./redteam/grade";
+import { inspectMetadata, type MetadataCheck } from "./redteam/metadata";
+import { ATTACK_IDS, type AttackRunResult, type Raster } from "./redteam/types";
 import { APP_VERSION, buildAuditReport, reportSummaryHtml, reportToJson } from "./report";
 import {
   buildVerifyReport,
@@ -130,6 +130,8 @@ interface VerifyState {
   priorFix: { fromSha256: string; boxesBurned: number } | null;
   /** Indices of hits whose recovered text the user chose to reveal. */
   revealed: Set<number>;
+  /** Container-level metadata (EXIF/GPS/XMP/PNG chunks) of the upload. */
+  metadata: MetadataCheck | null;
 }
 
 const vstate: VerifyState = {
@@ -143,6 +145,7 @@ const vstate: VerifyState = {
   fixedPng: null,
   priorFix: null,
   revealed: new Set(),
+  metadata: null,
 };
 
 /** Images above this many pixels are refused up front (rasterization is 4B/px). */
@@ -553,7 +556,7 @@ function reset() {
 
 // --- independent verify path ("verify an existing image") ---
 
-function rgbaFromImage(img: HTMLImageElement): RgbaImage {
+function rgbaFromImage(img: HTMLImageElement): Raster {
   const canvas = document.createElement("canvas");
   canvas.width = img.naturalWidth;
   canvas.height = img.naturalHeight;
@@ -562,16 +565,6 @@ function rgbaFromImage(img: HTMLImageElement): RgbaImage {
   ctx.drawImage(img, 0, 0);
   const d = ctx.getImageData(0, 0, canvas.width, canvas.height);
   return { width: d.width, height: d.height, data: d.data };
-}
-
-function rgbaToCanvas(img: RgbaImage): HTMLCanvasElement {
-  const canvas = document.createElement("canvas");
-  canvas.width = img.width;
-  canvas.height = img.height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas 2D context unavailable");
-  ctx.putImageData(new ImageData(img.data, img.width, img.height), 0, 0);
-  return canvas;
 }
 
 async function loadVerifyImage(file: Blob) {
@@ -594,7 +587,9 @@ async function loadVerifyImage(file: Blob) {
   }
   if (vstate.objectUrl) URL.revokeObjectURL(vstate.objectUrl);
   vstate.objectUrl = objectUrl;
-  vstate.imageSha = await sha256Hex(await file.arrayBuffer());
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  vstate.imageSha = await sha256Hex(bytes);
+  vstate.metadata = inspectMetadata(bytes, file.type || "");
   vstate.revealed.clear();
   await runVerify();
 }
@@ -608,13 +603,12 @@ async function runVerify() {
   status("Red-team check: running attack variants + local OCR on the file");
   try {
     const raster: Raster = rgbaFromImage(els.verifyImg);
-    const doors = { ocrInputFor: (r: Raster) => rgbaToCanvas(r as RgbaImage) };
-    const run = await runAttacks(raster, doors, {
-      // identity always runs; deep variants only when the checkbox is on and
-      // the image is small enough to transform without blowing memory
+    const run = await runAttacks(raster, {
+      // identity always runs; the other six variants only when the checkbox
+      // is on and the image is small enough to transform without blowing memory
       variants: deepOk ? undefined : ["identity"],
-      onProgress: (id, p) =>
-        updateSpinner(`Attack ${id}… ${Math.round(p * 100)}%`),
+      onProgress: (done, total, id) =>
+        updateSpinner(`Attack ${id}… ${done}/${total}`),
     });
     if (wantsDeep && !deepOk) {
       status(
@@ -623,26 +617,41 @@ async function runVerify() {
       );
     }
     vstate.run = run;
-    const quality = run.ocrQuality;
     const hits: VerifyHit[] = run.hits.map((h) => ({
-      category: h.detection.category,
-      rule: h.detection.rule,
-      confidence: h.detection.confidence,
-      bbox: h.detection.bbox,
-      attackIds: h.attackIds ?? [h.attackId],
-      text: h.detection.text,
+      category: h.category,
+      rule: h.rule,
+      confidence: h.confidence,
+      bbox: h.bbox,
+      attackIds: h.attacks,
+      text: h.text,
     }));
     vstate.hits = hits;
-    const g = attackGrade(run, quality.suspicious);
+    let quality: OcrQuality;
+    if (hits.length > 0) {
+      // hits prove OCR worked; summarize confidence from the hits themselves
+      quality = {
+        wordCount: run.recoveredWords,
+        meanConfidence: hits.reduce((s, h) => s + h.confidence, 0) / hits.length,
+        suspicious: false,
+      };
+    } else {
+      // "no hits" is only trustworthy when OCR saw a healthy amount of text;
+      // spend one extra pass to judge that before saying so
+      updateSpinner("No hits — checking OCR quality…");
+      const res = await recognize(els.verifyImg);
+      quality = assessOcrQuality(res.words);
+    }
+    const g = attackGrade(run);
     vstate.report = buildVerifyReport({
       imageSha256: vstate.imageSha,
       width: vstate.imageWidth,
       height: vstate.imageHeight,
       hits,
-      engine: "redteam-mock",
+      engine: "redteam-engine",
       attacksRun: run.variants.map((v) => v.id),
-      grade: g,
+      grade: { letter: g.grade, reasons: g.reasons },
       quality,
+      metadata: vstate.metadata ?? undefined,
       // priorFix is only set right after a fix, when vstate.report still
       // holds the flagged file's report — so prior status/hits come from it
       fix:
@@ -665,19 +674,42 @@ async function runVerify() {
     els.verifyReportBody.innerHTML = verifySummaryHtml(vstate.report);
     els.verifyReportCard.hidden = false;
 
-    // grade panel: letter + honest reasons (F / C / B — never "safe")
+    // grade panel: letter + engine reasons (F / C / B / A — an A still only
+    // means "these attacks recovered nothing", never "safe")
     const gp = els.verifyGradeEl;
     gp.hidden = false;
-    gp.className = `grade-panel g-${g.letter.toLowerCase()}`;
+    gp.className = `grade-panel g-${g.grade.toLowerCase()}`;
+    const subsetNote =
+      run.variants.length < ATTACK_IDS.length
+        ? `<li>Only ${run.variants.length} of ${ATTACK_IDS.length} attack variants ran — ` +
+          `enable "all attack variants" for the full pass.</li>`
+        : "";
     gp.innerHTML =
-      `<span class="grade-letter">${g.letter}</span>` +
-      `<ul class="grade-reasons">${g.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>`;
+      `<span class="grade-letter">${g.grade}</span>` +
+      `<ul class="grade-reasons">${g.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}${subsetNote}</ul>`;
 
     const st = verifyStatus(hits, quality);
     const banner = els.verifyBannerEl;
     banner.hidden = false;
     banner.classList.remove("warn", "inconclusive");
     els.verifyFixBtn.hidden = st !== "hits-found";
+    const md = vstate.metadata;
+    const metaLeak =
+      md && (md.hasExif || md.hasGps || md.hasXmp || md.pngTextChunks.length > 0)
+        ? `<p class="sub"><strong>Container metadata found:</strong> ${esc(
+            [
+              md.hasGps ? "GPS (EXIF)" : "",
+              md.hasExif && !md.hasGps ? "EXIF" : "",
+              md.hasXmp ? "XMP" : "",
+              md.pngTextChunks.length
+                ? `PNG text chunks (${md.pngTextChunks.join(", ")})`
+                : "",
+            ]
+              .filter(Boolean)
+              .join(", "),
+          )} — about ${md.bytesStripped ?? 0} bytes. The file itself carries it; ` +
+          `re-exporting through Path A strips it.</p>`
+        : "";
     if (st === "hits-found") {
       banner.classList.add("warn");
       banner.innerHTML =
@@ -685,14 +717,16 @@ async function runVerify() {
         `attack variants recovered text under the cover-up (outlined on the image). ` +
         `Do not share it as-is.` +
         `<p class="sub">Hits are pattern matches in the categories listed in the audit — ` +
-        `verify them visually, and remember names/addresses aren't covered at all.</p>`;
+        `verify them visually, and remember names/addresses aren't covered at all.</p>` +
+        metaLeak;
       status(`Red-team check complete: ${hits.length} recoverable patterns.`);
     } else if (st === "no-hits") {
       banner.innerHTML =
         `<strong>Not flagged by these checks</strong> — no supported patterns recovered.` +
         `<p class="sub">That is not the same as safe: only the 8 pattern types were tested. ` +
         `Names, addresses, DOBs, account numbers, handwriting and QR/barcodes are not ` +
-        `covered. Eyeball it before sharing.</p>`;
+        `covered. Eyeball it before sharing.</p>` +
+        metaLeak;
       status("Red-team check complete: nothing recovered.");
     } else {
       banner.classList.add("inconclusive");
@@ -700,7 +734,8 @@ async function runVerify() {
         `<strong>Inconclusive:</strong> nothing recovered, but OCR confidence on this image ` +
         `is low (${quality.wordCount} words, ${Math.round(quality.meanConfidence * 100)}% avg). ` +
         `Faint or low-resolution text can read as "clean" — try the attack variants and ` +
-        `review the image yourself before sharing.`;
+        `review the image yourself before sharing.` +
+        metaLeak;
       status("Red-team check inconclusive: low OCR confidence.");
     }
     els.verifySection.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -866,6 +901,7 @@ function resetVerify() {
   vstate.fixedPng = null;
   vstate.priorFix = null;
   vstate.revealed.clear();
+  vstate.metadata = null;
   els.verifySection.hidden = true;
   els.verifyBannerEl.hidden = true;
   els.verifyGradeEl.hidden = true;
@@ -910,8 +946,8 @@ els.verifyDropzone.addEventListener("drop", (e) => {
 
 els.verifyDemoBtn.addEventListener("click", async () => {
   try {
-    const res = await fetch("demo-leaky.png");
-    if (!res.ok) throw new Error("demo-leaky.png missing");
+    const res = await fetch("demo-redteam.png");
+    if (!res.ok) throw new Error("demo-redteam.png missing");
     const blob = await res.blob();
     await loadVerifyImage(blob).catch((err) => status(String(err)));
   } catch (err) {

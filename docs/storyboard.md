@@ -1,56 +1,55 @@
-# RedactProof — refreshed demo storyboard (≤2:30)
+# RedactProof Red Team — demo storyboard (≤2:30)
 
 Target runtime ~2:20. One continuous take; cuts marked **[CUT]** are optional
-trims. Narration is a guide, not a script. The new centerpiece is the
-**independent verifier** — shot 3 is the money shot.
+trims. Narration is a guide, not a script. The centerpiece is the **red-team
+attack → grade → one-click fix → re-attack** loop on a file that *looks*
+redacted.
 
 | # | Shot | Screen | Narration beat | ~Time |
 |---|------|--------|----------------|-------|
-| 1 | Cold open on landing | Two paths side by side + "100% local" pill | "Most redaction tools trust the editor. RedactProof checks the *pixels* — whether it redacted the image, or some other tool did." | 0:00–0:15 |
-| 2 | Click **Try the leaky-redaction demo** (verify path) | OCR spinner with % progress | "This screenshot was 'redacted' somewhere else. The card and ID look covered — everything runs locally, nothing uploads." | 0:15–0:30 |
-| 3 | **Verify results appear** | "2 residual detector hits" warn banner + outlined regions on the real image | "But look: the email was only covered by a translucent white-out — still readable. And the phone number in the sign-off was missed entirely. That's what you just almost shared." | 0:30–0:55 |
-| 4 | Sidebar + pass provenance | Hit list with category/rule/confidence + "standard" chips | "Each hit shows what fired and where — eight pattern rules, checked against the actual file." **[CUT]** | 0:55–1:05 |
-| 5 | Verification audit card | SHA-256, 1100×640 (filename omitted), hits table, limitations | "And the audit is deliberately minimal: the file's hash, counts, hit locations, detector limits. Detected strings and even the filename are never written into it." | 1:05–1:20 |
-| 6 | Path A quick pass: **Try the synthetic demo** → de-collided labels → Redact & export | Review screen with ~10 labeled boxes; before/after export | "When RedactProof does the redaction itself, it burns opaque pixels into a fresh canvas — no reversible overlay." **[CUT the review dwell]** | 1:20–1:50 |
-| 7 | Export verification + report | "Verification clean" banner + audit report | "Then it re-scans its own export. Clean means the detectors found nothing — not that nothing could ever be missed." | 1:50–2:10 |
-| 8 | Close | Footer disclaimer / honest-limitations | "It's honest about limits: names, addresses, handwriting, QR codes aren't covered — mask those yourself. Redact it. Then prove you checked." | 2:10–2:20 |
+| 1 | Cold open on landing | Two paths side by side + "100% local" pill | "Most redaction tools trust the editor. RedactProof attacks the pixels — whether it redacted the image, or some other tool did." | 0:00–0:15 |
+| 2 | Click **Try the marker-covered demo** (red-team path) | Attack spinner cycling variants (`identity → levels-stretch → …`) | "This screenshot was 'redacted' somewhere else — a black marker box at 55% opacity. Looks covered. Everything runs locally; nothing uploads." | 0:15–0:35 |
+| 3 | **Attack results appear** | Grade **C** panel + warn banner + outlined recovered regions | "Plain OCR sees nothing — that's the trap. But the attack pass stretches the marker's levels and reads right through it: five-plus sensitive patterns, recoverable. That's what you just almost shared." | 0:35–1:00 |
+| 4 | Hit list, masked text | Category/rule/confidence + attack chips (`levels-stretch`), bullets for text, reveal toggle | "Every hit names the attack that broke it. The recovered text stays masked — you can reveal it to confirm, and it never lands in the audit." **[CUT]** | 1:00–1:10 |
+| 5 | Audit card | SHA-256, grade C, engine + variants, metadata row, limitations | "The audit is deliberately narrow: the file's hash, the grade, which attacks ran, where the hits are — detected strings and even the filename are never written into it." | 1:10–1:25 |
+| 6 | Click **Fix it — burn opaque boxes & re-check** | Spinner, then grade **A**, fix panel before/after | "One click burns *opaque* boxes over every recovered region and re-attacks the fixed pixels — nothing survives, nothing to peel off." | 1:25–1:55 |
+| 7 | New audit + download | "Fix provenance" row chaining the flagged hash | "And the re-check chains back to the flagged file's hash, so the audit tells the whole story." **[CUT]** | 1:55–2:05 |
+| 8 | Close | Footer disclaimer / honest-limitations | "An A means *these* attacks recovered nothing — not 'safe'. Names, addresses, handwriting, QR codes aren't covered — mask those yourself. Redact it. Then prove you checked." | 2:05–2:20 |
 
 ## Demo choreography notes
 
-- Shot 3 is the core demo moment: an apparently covered screenshot still has
-  readable email text, and the independent final-file check flags it before
-  sharing. Linger on the outlined region.
-- The leaky fixture is synthetic: `jane.public@example.com` under a ~40%
-  white-out rectangle, `(416) 555-0142` missed in the sign-off, opaque boxes
-  over card + SSN (which correctly do *not* fire).
-- For a second beat in shot 4, re-run with **Deeper scan** checked: the audit
-  shows `standard → enhanced-2x` passes and each hit gains an `enhanced-2x`
-  provenance chip — proves the contrast/upscale pass works and dedupe merges.
+- Shot 3 is the money shot: the baseline (`identity`) pass reads nothing, the
+  enhancement variants recover the covered patterns — that gap is the whole
+  point. Linger on a recovered region before the grade reads out.
+- The hero fixture is `fixtures/redteam/marker-55.png` (served as
+  `public/demo-redteam.png`): a synthetic support screenshot under a 55% black
+  marker. Measured behavior in `tests/redteam.test.ts`: identity recovers
+  nothing; `levels-stretch` recovers 5+ categories incl. payment card → grade
+  **C**. Opaque-burned export → grade **A**.
+- Honest grade vocabulary on screen: F = readable as-is, C = recoverable only
+  after enhancement, B = marginal weak recovery, A = nothing recovered *by
+  these tests*. Never say "safe".
 - If network conditions matter, open DevTools first: every request is
   same-origin (`/vendor`, `/lang`) — a good visual for the "no third-party
   runtime" claim.
 - Wording that keeps us honest: say "omits detected strings and the filename",
   never "contains no personal information"; say "a check ran", never "proof
-  the image is clean"; the verifier reads pixels, it can't recover truly
-  burned ones or guarantee coverage.
-- Screenshots of this flow live in `docs/screenshots/`:
-  `landing-two-paths.png`, `verify-leaky-flagged.png`, `verify-deep-scan.png`,
-  `review-de-collided-tags.png`, `export-clean-audit.png`.
+  the image is clean".
+- Screenshots of this flow live in `docs/screenshots/`.
 
 ## Demo candidate
 
-`docs/demo-two-path-126s.mp4` — 126s raw take covering shots 1–7 (landing →
-leaky verify flagged → audit → synthetic demo → export + clean banner +
-report). Unnarrated; VO per the table above. This is a **new** candidate that
-replaces the old single-path demo — it exists because the independent-verifier
-path did not exist when the earlier cut was recorded.
+`docs/demo-two-path-126s.mp4` — 126s raw take of the **pre-red-team** two-path
+flow (leaky-fixture verify → audit → synthetic demo → export + clean banner +
+report). Superseded for the Red Team cut: re-record shots 1–7 above once the
+merged-engine build is on the demo machine.
 SHA-256: `e07db30b42a92ef4c4a5e02c4a067d53a986a8572835d4b2fa42e8b09ffd2e92`
 
 ## Reference hashes (this build)
 
-- `fixtures/leaky-redaction.png` / `public/demo-leaky.png` image SHA-256 as
-  reported by the verifier: `90ac2ac90d11e4e97e8a387349aabf53adafbd7bdecbb985f57cd0b520794c32`
-  (matches `sha256sum` of the file — it hashes the uploaded bytes verbatim).
+- `public/demo-redteam.png` (copied from `fixtures/redteam/marker-55.png`)
+  SHA-256: `e9421db4b73eea7a4d48982d9308247fe179db219671595af725e4a913973520`
+  (the audit hashes the uploaded bytes verbatim — same as `sha256sum`).
 - Redact-path export PNG SHA-256 from the golden-path run:
   `8e75b14e258e0641f4bf2fdc59b8bdabe4357e9fc312a28ab672ca590f84eea4`
   (PNG re-encode is deterministic in this build, but treat export hashes as

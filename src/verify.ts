@@ -108,6 +108,13 @@ export function buildVerifyReport(args: {
   attacksRun: string[];
   grade: { letter: "A" | "B" | "C" | "F"; reasons: string[] };
   quality: OcrQuality;
+  metadata?: {
+    hasExif: boolean;
+    hasGps: boolean;
+    hasXmp: boolean;
+    pngTextChunks: string[];
+    bytesStripped: number | null;
+  };
   fix?: { fromSha256: string; boxesBurned: number; priorStatus: VerifyStatus; priorHits: number };
   now?: Date;
 }): VerifyReport {
@@ -137,6 +144,7 @@ export function buildVerifyReport(args: {
         bbox: h.bbox,
         attackIds: h.attackIds,
       })),
+      ...(args.metadata ? { metadata: args.metadata } : {}),
     },
     ...(args.fix ? { fix: args.fix } : {}),
     detectorScope: DETECTOR_SCOPE,
@@ -176,6 +184,31 @@ export function verifySummaryHtml(report: VerifyReport): string {
         STATUS_LABEL[report.fix.priorStatus]
       })</dd>`
     : "";
+  const md = report.check.metadata;
+  const mdLeak =
+    md && (md.hasExif || md.hasGps || md.hasXmp || md.pngTextChunks.length > 0);
+  const mdRow = !md
+    ? ""
+    : `<dt>Container metadata</dt><dd>${
+        mdLeak
+          ? `Residual metadata in the file: ${esc(
+              [
+                md.hasGps ? "GPS (EXIF)" : "",
+                md.hasExif && !md.hasGps ? "EXIF" : "",
+                md.hasXmp ? "XMP" : "",
+                md.pngTextChunks.length
+                  ? `PNG text chunks: ${md.pngTextChunks.join(", ")}`
+                  : "",
+              ]
+                .filter(Boolean)
+                .join(", "),
+            )}${
+              md.bytesStripped
+                ? ` — ~${md.bytesStripped} bytes removable by re-export`
+                : ""
+            }`
+          : "None detected (no EXIF/GPS/XMP or PNG text chunks)"
+      }</dd>`;
   return `
     <dl class="report-dl">
       <dt>Generated</dt><dd>${esc(report.generatedAt)}</dd>
@@ -191,6 +224,7 @@ export function verifySummaryHtml(report: VerifyReport): string {
         report.check.ocrMeanConfidence * 100,
       )}% avg confidence${report.check.lowOcrConfidence ? " — low" : ""}</dd>
       <dt>Residual hits</dt><dd>${report.check.residualHits}</dd>
+      ${mdRow}
       ${fixRow}
     </dl>
     ${hitsTable}

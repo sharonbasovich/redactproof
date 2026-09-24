@@ -42,23 +42,25 @@ Already redacted a screenshot in another tool (Preview, Photos, a markup
 extension)? Drop the **final file** and let the attack engine try to break
 its cover-up:
 
-1. The uploaded bytes are hashed (SHA-256) and rasterized; attack variants
-   (`identity`, contrast/upscale transforms — the mock stands in until
-   `src/redteam/` lands) each get an OCR pass, locally.
+1. The uploaded bytes are hashed (SHA-256), checked for residual container
+   metadata (EXIF/GPS/XMP/PNG text chunks), and rasterized; up to 7 attack
+   variants (`identity`, `levels-stretch`, `gamma-lift`, `gamma-drop`,
+   `invert`, `channel-max`, `upscale-sharpen`) each get an OCR pass, locally.
 2. Hits are deduplicated across variants and carry attack provenance — which
    variant(s) recovered the region. Recovered text is shown **masked by
    default** with a click-to-reveal; it never enters the audit.
-3. An honest heuristic grade is computed: **F** (patterns recovered under
-   cover-up), **C** (inconclusive — OCR too weak to trust the absence), or
-   **B** (not flagged by *these* checks). There is deliberately no A: "not
-   flagged" is never "safe".
+3. The engine grades the run: **F** (hits readable on the untouched pixels),
+   **C** (hits recoverable only after enhancement — the translucent-cover
+   case), **B** (marginal recovery — every enhanced hit is low-confidence),
+   **A** (nothing recovered by any attack run). An A still means "not
+   flagged by *these* checks", never "safe".
 4. **Fix it** — one click burns padded opaque boxes over every flagged
    region, then re-attacks the *fixed* pixels end-to-end. The new audit
    carries fix provenance back to the flagged file's hash.
 5. The audit JSON is narrowly worded: image SHA-256, dimensions, grade,
-   engine id, variants run, hit counts/locations, OCR quality, detector
-   scope and limitations. Statuses are `hits-found`, `no-hits`, or
-   `inconclusive` — never "PII-free".
+   engine id, variants run, hit counts/locations, OCR quality, container
+   metadata findings, detector scope and limitations. Statuses are
+   `hits-found`, `no-hits`, or `inconclusive` — never "PII-free".
 
 Images over 24MP are refused up front; 2× attack variants are skipped above
 6MP to keep the tab responsive (the audit says so when that happens).
@@ -107,11 +109,14 @@ src/
   report.ts   minimal-content audit report builder (JSON + printable HTML)
   verify.ts   independent-verifier report builder + cross-attack hit dedupe,
               hit-bbox padding for the opaque fix
-  redteam-mock.ts  TEMPORARY stand-in for the red-team engine contract
-              (Raster/AttackId/runAttacks/grade — see src/redteam/ once the
-              engine branch lands; imports repoint unchanged)
-  preprocess.ts  pure RGBA ops (contrast stretch, 2x upscale) for attack
-              variants — shared by the browser canvas path and pngjs tests
+  redteam/    attack engine (merged from codex/redactproof-redteam-*):
+              types.ts (Raster/AttackId/contracts), attack.ts (7 variants,
+              runAttacks, cross-variant dedupe), grade.ts (A/B/C/F grading),
+              canvas.ts (raster <-> canvas/pngjs bridge), analyze.ts
+              (redaction-region classification), metadata.ts (EXIF/GPS/XMP/
+              PNG-chunk inspector)
+  preprocess.ts  pure RGBA ops (contrast stretch, 2x upscale) — shared by
+              the browser canvas path and pngjs tests
   main.ts     UI orchestration: upload, review overlay, manual boxes, export,
               verification pass, red-team path (grade/masked hits/fix loop),
               report rendering
@@ -121,7 +126,12 @@ tests/
                   -> re-OCR -> assert zero residual hits + report contract
   verify.test.ts  leaky-fixture detection, dedupe, status logic, stable
                   SHA-256, report string/filename hygiene, bbox padding,
-                  fix provenance, mock-engine contract (runAttacks/grade)
+                  fix provenance, engine integration (marker-55 baseline-miss
+                  -> enhancement recovery -> opaque-burn -> re-attack clean),
+                  metadata inspector
+  redteam.test.ts engine suite: transforms, dedupe, grading, measured
+                  fixture recovery
+  redteam/      analyze + metadata test suites
 scripts/
   make_fixtures.py  generates the synthetic demo/fixture screenshot (PIL)
   vendor.sh         copies tesseract assets into public/
@@ -145,11 +155,13 @@ the card numbers are published test PANs, the SSN is the historical Woolworth
 specimen, the phone number is a reserved 555 range, the IP is TEST-NET-3, and
 the emails use example.com. No real personal data is used anywhere.
 
-`fixtures/leaky-redaction.png` / `public/demo-leaky.png` is the verifier demo:
-a screenshot "redacted" in another tool where the card and SSN are covered by
-solid boxes but the email only got a translucent white-out — still readable
-to OCR — and a phone number was missed entirely. Verifying it should flag
-exactly the residual email and phone.
+`fixtures/redteam/marker-55.png` / `public/demo-redteam.png` is the red-team
+demo: a screenshot covered by a 55%-opacity black marker — it *looks*
+redacted, plain OCR reads nothing, but the `levels-stretch` attack recovers
+5+ supported categories (measured in `tests/redteam.test.ts`). The expected
+flow is grade **C** → **Fix it** → re-attack grades **A** on the burned
+export. `fixtures/redteam/` also holds `marker-75`, `marker-yellow`,
+`marker-opaque` (the control), `blur`, `pixelate` and `clean`.
 
 ## License
 

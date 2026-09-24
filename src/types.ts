@@ -94,6 +94,17 @@ export interface VerifyReport {
       bbox: BBox;
       attackIds: string[];
     }>;
+    /**
+     * Container-level metadata found in the uploaded file itself
+     * (independent of the pixel attack pass). Chunk names only — no values.
+     */
+    metadata?: {
+      hasExif: boolean;
+      hasGps: boolean;
+      hasXmp: boolean;
+      pngTextChunks: string[];
+      bytesStripped: number | null;
+    };
   };
   /**
    * Set when this report describes a re-check of a file the user just fixed

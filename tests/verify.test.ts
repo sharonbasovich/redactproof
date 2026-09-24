@@ -14,7 +14,10 @@ import { assessOcrQuality, detectSensitive } from "../src/detect";
 import { recognize, terminateOcr } from "../src/ocr";
 import { enhanceContrast, upscale2x, type RgbaImage } from "../src/preprocess";
 import { sha256Hex } from "../src/redact";
-import { grade as attackGrade, runAttacks, type Raster } from "../src/redteam-mock";
+import { runAttacks } from "../src/redteam/attack";
+import { grade as attackGrade } from "../src/redteam/grade";
+import { inspectMetadata } from "../src/redteam/metadata";
+import type { Raster } from "../src/redteam/types";
 import {
   buildVerifyReport,
   dedupeHits,
@@ -218,7 +221,7 @@ describe("leaky fixture — independent verify catches what 'redaction' missed",
         width: 1100,
         height: 640,
         hits,
-        engine: "redteam-mock",
+        engine: "redteam-engine",
         attacksRun: ["identity"],
         grade: { letter: "F", reasons: ["2 supported patterns recovered"] },
         quality,
@@ -245,7 +248,7 @@ describe("leaky fixture — independent verify catches what 'redaction' missed",
       width: 1100,
       height: 640,
       hits: [],
-      engine: "redteam-mock",
+      engine: "redteam-engine",
       attacksRun: ["identity"],
       grade: { letter: "B", reasons: ["not flagged"] },
       quality: { wordCount: 40, meanConfidence: 0.9, suspicious: false },
@@ -263,94 +266,83 @@ describe("leaky fixture — independent verify catches what 'redaction' missed",
   });
 });
 
-describe("red-team mock engine (contract stand-in)", () => {
-  const doors = {
-    ocrInputFor: (r: Raster) =>
-      PNG.sync.write(pngOf({ ...r } as RgbaImage)),
+describe("red-team engine integration (real src/redteam/*)", () => {
+  const toRaster = (path: string): Raster => {
+    const png = PNG.sync.read(readFileSync(path));
+    return {
+      width: png.width,
+      height: png.height,
+      data: new Uint8ClampedArray(png.data),
+    };
   };
 
   it(
-    "runAttacks flags the leaky fixture and hits carry attack provenance",
+    "misleading 55%-marker fixture: identity misses, enhancement recovers",
     async () => {
-      const png = PNG.sync.read(readFileSync(FIXTURE));
-      const run = await runAttacks(toRgba(png), doors);
-      expect(run.variants.map((v) => v.id)).toContain("identity");
-      expect(run.hits.length).toBeGreaterThan(0);
-      expect(
-        run.hits.every((h) => (h.attackIds ?? [h.attackId]).length > 0),
-      ).toBe(true);
-      expect(run.hits.some((h) => h.detection.category === "email")).toBe(true);
-      expect(run.elapsedMs).toBeGreaterThanOrEqual(0);
+      const raster = toRaster("fixtures/redteam/marker-55.png");
+      const baseline = await runAttacks(raster, { variants: ["identity"] });
+      expect(baseline.hits).toHaveLength(0); // the cover looks opaque to plain OCR
+      const full = await runAttacks(raster);
+      const cats = new Set(full.hits.map((h) => h.category));
+      expect(cats.size).toBeGreaterThanOrEqual(5);
+      expect(full.hits.every((h) => h.attacks.length > 0)).toBe(true);
+      const g = attackGrade(full);
+      expect(g.grade).toBe("C"); // recoverable only after enhancement
+      // grade reasons are content-free: no recovered strings
+      expect(g.reasons.join(" ")).not.toMatch(/@|example\.com/);
     },
-    240_000,
+    300_000,
   );
 
   it(
-    "identity-only run is honored and the deep variant adds provenance",
+    "opaque-burned export resists the same attacks (the fix contract)",
     async () => {
-      const png = PNG.sync.read(readFileSync(FIXTURE));
-      const shallow = await runAttacks(toRgba(png), doors, {
-        variants: ["identity"],
-      });
-      expect(shallow.variants.map((v) => v.id)).toEqual(["identity"]);
-      const deep = await runAttacks(toRgba(png), doors, {
-        variants: ["identity", "upscale-sharpen"],
-      });
-      expect(deep.variants.map((v) => v.id)).toEqual([
-        "identity",
-        "upscale-sharpen",
-      ]);
+      // simulate the UI fix path: burn opaque boxes over the covered rows
+      const raster = toRaster("fixtures/redteam/marker-55.png");
+      // find the marker regions via the engine's own recovery, then zero them
+      const full = await runAttacks(raster);
+      expect(full.hits.length).toBeGreaterThan(0);
+      for (const h of full.hits) {
+        const b = padHitBbox(h.bbox, raster.width, raster.height);
+        for (let y = b.y0; y < b.y1; y++) {
+          for (let x = b.x0; x < b.x1; x++) {
+            const i = (y * raster.width + x) * 4;
+            raster.data[i] = raster.data[i + 1] = raster.data[i + 2] = 0;
+            raster.data[i + 3] = 255;
+          }
+        }
+      }
+      const reattack = await runAttacks(raster);
+      expect(reattack.hits).toHaveLength(0);
+      expect(attackGrade(reattack).grade).toBe("A");
     },
-    240_000,
+    300_000,
   );
 
-  it("mock grade is honest: F on hits, never an A", () => {
-    const withHits = attackGrade(
-      {
-        variants: [],
-        hits: [
-          {
-            attackId: "identity",
-            detection: {
-              category: "email",
-              rule: "rfc5322-lite",
-              text: "x@y.z",
-              confidence: 0.9,
-              wordIndices: [0],
-              bbox: { x0: 0, y0: 0, x1: 10, y1: 8 },
-            },
-          },
-        ],
-        recoveredWords: 50,
-        elapsedMs: 1,
-        ocrQuality: { wordCount: 50, meanConfidence: 0.9, suspicious: false },
-      },
-      false,
-    );
-    expect(withHits.letter).toBe("F");
-    const clean = attackGrade(
-      {
-        variants: [],
-        hits: [],
-        recoveredWords: 50,
-        elapsedMs: 1,
-        ocrQuality: { wordCount: 50, meanConfidence: 0.9, suspicious: false },
-      },
-      false,
-    );
-    expect(clean.letter).toBe("B");
-    // a clean run must hedge — "not flagged" wording, never a bare "safe"
-    expect(clean.reasons.join(" ")).toMatch(/not (the same as )?safe|not a guarantee/i);
-    const shaky = attackGrade(
-      {
-        variants: [],
-        hits: [],
-        recoveredWords: 3,
-        elapsedMs: 1,
-        ocrQuality: { wordCount: 3, meanConfidence: 0.3, suspicious: true },
-      },
-      true,
-    );
-    expect(shaky.letter).toBe("C");
+  it("inspectMetadata: clean canvas export reports nothing, EXIF JPEG is caught", () => {
+    const pngBytes = new Uint8Array(readFileSync("fixtures/redteam/marker-55.png"));
+    const clean = inspectMetadata(pngBytes, "image/png");
+    expect(clean.hasExif).toBe(false);
+    expect(clean.pngTextChunks).toHaveLength(0);
+    // minimal JPEG with an EXIF APP1 segment containing a GPS IFD pointer
+    const exif = [
+      0x45, 0x78, 0x69, 0x66, 0x00, 0x00, // "Exif\0\0"
+      0x4d, 0x4d, 0x00, 0x2a, // big-endian, magic 42
+      0x00, 0x00, 0x00, 0x08, // IFD0 offset
+      0x00, 0x01, // 1 entry
+      0x88, 0x25, 0x00, 0x03, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, // GPSInfo tag
+      0x00, 0x00, 0x00, 0x00, // next IFD
+    ];
+    const app1Len = exif.length + 2;
+    const jpeg = new Uint8Array([
+      0xff, 0xd8, // SOI
+      0xff, 0xe1, app1Len >> 8, app1Len & 0xff,
+      ...exif,
+      0xff, 0xda, // SOS ends metadata
+    ]);
+    const found = inspectMetadata(jpeg, "image/jpeg");
+    expect(found.hasExif).toBe(true);
+    expect(found.hasGps).toBe(true);
+    expect(found.bytesStripped).toBeGreaterThan(0);
   });
 });
