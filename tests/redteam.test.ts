@@ -203,8 +203,8 @@ describe("fixture recovery (real OCR)", () => {
     const g = grade(r);
     expect(g.grade).toBe("C");
     expect(r.hits.some((h) => h.attacks.includes("levels-stretch"))).toBe(true);
-    // measured: 5 categories recovered (email, phone, card, ssn, zip)
-    expect(cats(r).size).toBeGreaterThanOrEqual(4);
+    // measured: all 6 categories recovered via levels-stretch
+    expect(cats(r).size).toBeGreaterThanOrEqual(5);
     expect(cats(r).has("payment-card")).toBe(true);
   }, 120_000);
 
