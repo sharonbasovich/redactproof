@@ -254,6 +254,7 @@ h1 { font-size: 1.5rem; margin: 0; letter-spacing: -0.02em; }
 .grade-panel.g-a .grade-letter { color: #4ade80; }
 .grade-panel .grade-reasons { margin: 0; padding-left: 18px; font-size: 0.85rem; color: var(--muted); }
 .grade-panel .grade-reasons li { margin: 2px 0; }
+.grade-panel .grade-axis { margin: 8px 0 0; font-size: 0.75rem; color: var(--muted); font-style: italic; }
 
 .fix-panel {
   border: 1px solid var(--border); border-radius: 10px;

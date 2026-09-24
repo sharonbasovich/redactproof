@@ -59,6 +59,7 @@ const els = {
   verifyDropzone: $<HTMLDivElement>("#verify-dropzone"),
   verifyFileInput: $<HTMLInputElement>("#verify-file-input"),
   verifyDemoBtn: $<HTMLButtonElement>("#verify-demo-btn"),
+  verifyMetaDemoBtn: $<HTMLButtonElement>("#verify-meta-demo-btn"),
   deepScan: $<HTMLInputElement>("#deep-scan"),
   verifySection: $<HTMLElement>("#verify-section"),
   verifyImg: $<HTMLImageElement>("#verify-img"),
@@ -70,6 +71,7 @@ const els = {
   verifyEmpty: $<HTMLParagraphElement>("#verify-empty"),
   verifyGradeEl: $<HTMLDivElement>("#verify-grade"),
   verifyFixBtn: $<HTMLButtonElement>("#verify-fix-btn"),
+  verifyStripBtn: $<HTMLButtonElement>("#verify-strip-btn"),
   verifyFixPanel: $<HTMLDivElement>("#verify-fix-panel"),
   fixBefore: $<HTMLImageElement>("#fix-before"),
   fixAfter: $<HTMLImageElement>("#fix-after"),
@@ -132,6 +134,8 @@ interface VerifyState {
   revealed: Set<number>;
   /** Container-level metadata (EXIF/GPS/XMP/PNG chunks) of the upload. */
   metadata: MetadataCheck | null;
+  /** What metadata a just-stripped file used to carry (provenance note). */
+  priorStrip: string | null;
 }
 
 const vstate: VerifyState = {
@@ -146,6 +150,7 @@ const vstate: VerifyState = {
   priorFix: null,
   revealed: new Set(),
   metadata: null,
+  priorStrip: null,
 };
 
 /** Images above this many pixels are refused up front (rasterization is 4B/px). */
@@ -567,8 +572,13 @@ function rgbaFromImage(img: HTMLImageElement): Raster {
   return { width: d.width, height: d.height, data: d.data };
 }
 
-async function loadVerifyImage(file: Blob) {
+async function loadVerifyImage(file: Blob, internal = false) {
   const objectUrl = URL.createObjectURL(file);
+  if (!internal) {
+    // a fresh user upload has no fix/strip provenance — clear any left over
+    vstate.priorFix = null;
+    vstate.priorStrip = null;
+  }
   const img = els.verifyImg;
   await new Promise<void>((resolve, reject) => {
     img.onload = () => resolve();
@@ -642,6 +652,7 @@ async function runVerify() {
       quality = assessOcrQuality(res.words);
     }
     const g = attackGrade(run);
+    const weakCoverage = hits.length === 0 && quality.suspicious;
     vstate.report = buildVerifyReport({
       imageSha256: vstate.imageSha,
       width: vstate.imageWidth,
@@ -684,9 +695,16 @@ async function runVerify() {
         ? `<li>Only ${run.variants.length} of ${ATTACK_IDS.length} attack variants ran — ` +
           `enable "all attack variants" for the full pass.</li>`
         : "";
+    const weakNote = weakCoverage
+      ? `<li><strong>Uncertainty:</strong> OCR saw too little text to trust an absence ` +
+        `(${quality.wordCount} words, ${Math.round(quality.meanConfidence * 100)}% avg) — ` +
+        `read the grade as "untested", not "clean".</li>`
+      : "";
     gp.innerHTML =
       `<span class="grade-letter">${g.grade}</span>` +
-      `<ul class="grade-reasons">${g.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}${subsetNote}</ul>`;
+      `<ul class="grade-reasons">${g.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}${subsetNote}${weakNote}</ul>` +
+      `<p class="grade-axis">Grade measures recovery by the tested attacks only — ` +
+      `never a safety certification.</p>`;
 
     const st = verifyStatus(hits, quality);
     const banner = els.verifyBannerEl;
@@ -694,21 +712,15 @@ async function runVerify() {
     banner.classList.remove("warn", "inconclusive");
     els.verifyFixBtn.hidden = st !== "hits-found";
     const md = vstate.metadata;
-    const metaLeak =
-      md && (md.hasExif || md.hasGps || md.hasXmp || md.pngTextChunks.length > 0)
-        ? `<p class="sub"><strong>Container metadata found:</strong> ${esc(
-            [
-              md.hasGps ? "GPS (EXIF)" : "",
-              md.hasExif && !md.hasGps ? "EXIF" : "",
-              md.hasXmp ? "XMP" : "",
-              md.pngTextChunks.length
-                ? `PNG text chunks (${md.pngTextChunks.join(", ")})`
-                : "",
-            ]
-              .filter(Boolean)
-              .join(", "),
-          )} — about ${md.bytesStripped ?? 0} bytes. The file itself carries it; ` +
-          `re-exporting through Path A strips it.</p>`
+    const leakDesc = md && metadataLeakSummary(md);
+    els.verifyStripBtn.hidden = !leakDesc;
+    const metaLeak = leakDesc
+      ? `<p class="sub"><strong>Container metadata found:</strong> ${esc(leakDesc)} ` +
+        `— about ${md!.bytesStripped ?? 0} removable bytes detected. The file itself ` +
+        `carries it until exported — use "Strip metadata & re-check" or Path A.</p>`
+      : vstate.priorStrip
+        ? `<p class="sub">Container metadata stripped by re-encoding to a fresh PNG ` +
+          `(was: ${esc(vstate.priorStrip)}). Your original file on disk is untouched.</p>`
         : "";
     if (st === "hits-found") {
       banner.classList.add("warn");
@@ -722,7 +734,8 @@ async function runVerify() {
       status(`Red-team check complete: ${hits.length} recoverable patterns.`);
     } else if (st === "no-hits") {
       banner.innerHTML =
-        `<strong>Not flagged by these checks</strong> — no supported patterns recovered.` +
+        `<strong>No tested attack recovered a supported pattern</strong> — ` +
+        `no supported patterns recovered.` +
         `<p class="sub">That is not the same as safe: only the 8 pattern types were tested. ` +
         `Names, addresses, DOBs, account numbers, handwriting and QR/barcodes are not ` +
         `covered. Eyeball it before sharing.</p>` +
@@ -731,12 +744,15 @@ async function runVerify() {
     } else {
       banner.classList.add("inconclusive");
       banner.innerHTML =
-        `<strong>Inconclusive:</strong> nothing recovered, but OCR confidence on this image ` +
-        `is low (${quality.wordCount} words, ${Math.round(quality.meanConfidence * 100)}% avg). ` +
-        `Faint or low-resolution text can read as "clean" — try the attack variants and ` +
-        `review the image yourself before sharing.` +
+        `<strong>No tested attack recovered a supported pattern</strong> — but OCR ` +
+        `coverage was thin (${quality.wordCount} words, ` +
+        `${Math.round(quality.meanConfidence * 100)}% avg), so the absence carries ` +
+        `residual uncertainty.` +
+        `<p class="sub">That is not the same as safe: faint or low-resolution text ` +
+        `can read as clean, and only the 8 pattern types were tested. Review the ` +
+        `image yourself before sharing.</p>` +
         metaLeak;
-      status("Red-team check inconclusive: low OCR confidence.");
+      status("Red-team check: nothing recovered; low OCR coverage (uncertain).");
     }
     els.verifySection.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (err) {
@@ -753,6 +769,48 @@ function esc(s: string): string {
 /** Mask recovered text in the hit list: every non-space char becomes a bullet. */
 function maskText(t: string): string {
   return t.replace(/\S/g, "•");
+}
+
+/** One-line summary of residual container metadata, or null when clean. */
+function metadataLeakSummary(md: MetadataCheck): string | null {
+  const parts = [
+    md.hasGps ? "GPS (EXIF)" : "",
+    md.hasExif && !md.hasGps ? "EXIF" : "",
+    md.hasXmp ? "XMP" : "",
+    md.pngTextChunks.length
+      ? `PNG text chunks (${md.pngTextChunks.join(", ")})`
+      : "",
+  ].filter(Boolean);
+  return parts.length ? parts.join(", ") : null;
+}
+
+/**
+ * Metadata-only fix: re-encode the image through a fresh canvas (a PNG export
+ * carries no EXIF/GPS/XMP or text chunks), then re-run the whole audit on the
+ * stripped output so the report proves it's gone.
+ */
+async function stripMetadata() {
+  const md = vstate.metadata;
+  if (!md || !metadataLeakSummary(md)) return;
+  const img = els.verifyImg;
+  showSpinner("Stripping container metadata…");
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = vstate.imageWidth;
+    canvas.height = vstate.imageHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas 2D context unavailable");
+    ctx.drawImage(img, 0, 0);
+    const blob = await canvasToPngBlob(canvas);
+    vstate.fixedPng = new Uint8Array(await blob.arrayBuffer());
+    vstate.priorStrip = metadataLeakSummary(md);
+    status("Metadata stripped. Re-checking the clean output…");
+    await loadVerifyImage(blob, true);
+  } catch (err) {
+    status(`Strip failed: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    hideSpinner();
+  }
 }
 
 /**
@@ -786,7 +844,7 @@ async function fixVerifyFindings() {
     };
     els.verifyFixPanel.hidden = false;
     status("Opaque boxes burned. Re-attacking the fixed pixels…");
-    await loadVerifyImage(blob);
+    await loadVerifyImage(blob, true);
   } catch (err) {
     status(`Fix failed: ${err instanceof Error ? err.message : String(err)}`);
   } finally {
@@ -902,11 +960,13 @@ function resetVerify() {
   vstate.priorFix = null;
   vstate.revealed.clear();
   vstate.metadata = null;
+  vstate.priorStrip = null;
   els.verifySection.hidden = true;
   els.verifyBannerEl.hidden = true;
   els.verifyGradeEl.hidden = true;
   els.verifyFixPanel.hidden = true;
   els.verifyFixBtn.hidden = true;
+  els.verifyStripBtn.hidden = true;
   els.verifyReportCard.hidden = true;
   els.verifyHitsLayer.innerHTML = "";
   els.verifyFileInput.value = "";
@@ -955,6 +1015,17 @@ els.verifyDemoBtn.addEventListener("click", async () => {
   }
 });
 
+els.verifyMetaDemoBtn.addEventListener("click", async () => {
+  try {
+    const res = await fetch("demo-metadata.png");
+    if (!res.ok) throw new Error("demo-metadata.png missing");
+    const blob = await res.blob();
+    await loadVerifyImage(blob).catch((err) => status(String(err)));
+  } catch (err) {
+    status(`Demo load failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+});
+
 els.deepScan.addEventListener("change", () => {
   if (vstate.imageSha) void runVerify();
 });
@@ -968,6 +1039,7 @@ els.verifyJsonBtn.addEventListener("click", () => {
 els.verifyPrintBtn.addEventListener("click", () => window.print());
 els.verifyResetBtn.addEventListener("click", resetVerify);
 els.verifyFixBtn.addEventListener("click", () => void fixVerifyFindings());
+els.verifyStripBtn.addEventListener("click", () => void stripMetadata());
 els.fixDownloadBtn.addEventListener("click", downloadFixedPng);
 
 new ResizeObserver(() => renderVerifyHits()).observe(els.verifyStage);

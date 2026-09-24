@@ -89,6 +89,10 @@
                 <button id="verify-demo-btn" class="btn ghost" type="button">Try the marker-covered demo</button>
                 <span class="muted">looks covered — isn&rsquo;t</span>
               </div>
+              <div class="demo-row">
+                <button id="verify-meta-demo-btn" class="btn ghost" type="button">Try the metadata-leak demo</button>
+                <span class="muted">pixels clean — container isn&rsquo;t</span>
+              </div>
             </div>
           </div>
         </section>
@@ -98,6 +102,7 @@
             <h2>Red-team audit &mdash; the file you uploaded</h2>
             <div class="card-actions">
               <button id="verify-fix-btn" class="btn primary" type="button" hidden>Fix it — burn opaque boxes &amp; re-check</button>
+              <button id="verify-strip-btn" class="btn" type="button" hidden>Strip metadata &amp; re-check</button>
               <button id="verify-json-btn" class="btn" type="button">Download audit JSON</button>
               <button id="verify-print-btn" class="btn" type="button">Print report</button>
               <button id="verify-reset-btn" class="btn ghost" type="button">Start over</button>
