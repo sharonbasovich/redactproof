@@ -37,6 +37,15 @@ trims. Narration is a guide, not a script. The new centerpiece is the
   `landing-two-paths.png`, `verify-leaky-flagged.png`, `verify-deep-scan.png`,
   `review-de-collided-tags.png`, `export-clean-audit.png`.
 
+## Demo candidate
+
+`docs/demo-two-path-126s.mp4` — 126s raw take covering shots 1–7 (landing →
+leaky verify flagged → audit → synthetic demo → export + clean banner +
+report). Unnarrated; VO per the table above. This is a **new** candidate that
+replaces the old single-path demo — it exists because the independent-verifier
+path did not exist when the earlier cut was recorded.
+SHA-256: `e07db30b42a92ef4c4a5e02c4a067d53a986a8572835d4b2fa42e8b09ffd2e92`
+
 ## Reference hashes (this build)
 
 - `fixtures/leaky-redaction.png` / `public/demo-leaky.png` image SHA-256 as
