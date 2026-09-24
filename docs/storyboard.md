@@ -39,10 +39,15 @@ redacted.
 
 ## Demo candidate
 
+`docs/demo-redteam-final.mp4` — recorded run on the merged-engine build:
+marker demo → grade C ("recovery by the tested attacks only, never a safety
+certification") → masked recovered text → Fix → re-attack → grade A with
+"no tested attack recovered a supported pattern — residual uncertainty" +
+the metadata-leak demo → strip → re-check clean. This is the ≤2:30 demo cut.
+SHA-256: `7ba538138105a8dad43890255429045c42a03a3f6c0e92c95f59327a525dda0b`
+
 `docs/demo-two-path-126s.mp4` — 126s raw take of the **pre-red-team** two-path
-flow (leaky-fixture verify → audit → synthetic demo → export + clean banner +
-report). Superseded for the Red Team cut: re-record shots 1–7 above once the
-merged-engine build is on the demo machine.
+flow. Superseded by the recording above; kept for comparison only.
 SHA-256: `e07db30b42a92ef4c4a5e02c4a067d53a986a8572835d4b2fa42e8b09ffd2e92`
 
 ## Reference hashes (this build)
