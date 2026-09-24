@@ -47,6 +47,49 @@ export interface VerificationHit {
   bbox: BBox;
 }
 
+/** A hit found while independently verifying an already-exported image. */
+export interface VerifyHit extends VerificationHit {
+  /** Names of the OCR passes that produced this hit, e.g. ["standard", "enhanced-2x"]. */
+  passes: string[];
+}
+
+export type VerifyStatus = "hits-found" | "no-hits" | "inconclusive";
+
+/**
+ * Audit for the standalone "verify an existing image" path. Deliberately
+ * narrower than AuditReport: no redaction section (nothing was redacted
+ * here), no filename, no detected strings — just what was checked and
+ * how much trust to put in it.
+ */
+export interface VerifyReport {
+  tool: "RedactProof";
+  toolVersion: string;
+  reportKind: "independent-image-verify";
+  generatedAt: string; // ISO 8601
+  image: {
+    sha256: string;
+    pixelWidth: number;
+    pixelHeight: number;
+  };
+  check: {
+    status: VerifyStatus;
+    passesRun: string[];
+    ocrWords: number;
+    ocrMeanConfidence: number;
+    lowOcrConfidence: boolean;
+    residualHits: number;
+    hits: Array<{
+      category: string;
+      rule: string;
+      confidence: number;
+      bbox: BBox;
+      passes: string[];
+    }>;
+  };
+  detectorScope: string[];
+  limitations: string;
+}
+
 export interface AuditReport {
   tool: "RedactProof";
   toolVersion: string;

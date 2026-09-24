@@ -1,9 +1,25 @@
 import "./style.css";
 import { assessOcrQuality, detectSensitive, isSupportedImageType } from "./detect";
 import { recognize } from "./ocr";
+import { enhanceContrast, upscale2x, type RgbaImage } from "./preprocess";
 import { burnRedactions, canvasToPngBlob, sha256Hex } from "./redact";
 import { APP_VERSION, buildAuditReport, reportSummaryHtml, reportToJson } from "./report";
-import type { AuditReport, BBox, OcrWord, RedactionBox, VerificationHit } from "./types";
+import {
+  buildVerifyReport,
+  dedupeHits,
+  verifyReportToJson,
+  verifyStatus,
+  verifySummaryHtml,
+} from "./verify";
+import type {
+  AuditReport,
+  BBox,
+  OcrWord,
+  RedactionBox,
+  VerificationHit,
+  VerifyHit,
+  VerifyReport,
+} from "./types";
 
 const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel);
@@ -31,6 +47,24 @@ const els = {
   afterImg: $<HTMLImageElement>("#after-img"),
   hitsLayer: $<HTMLDivElement>("#hits-layer"),
   verifyBanner: $<HTMLDivElement>("#verify-banner"),
+  steps: $<HTMLOListElement>(".steps"),
+  verifyDropzone: $<HTMLDivElement>("#verify-dropzone"),
+  verifyFileInput: $<HTMLInputElement>("#verify-file-input"),
+  verifyDemoBtn: $<HTMLButtonElement>("#verify-demo-btn"),
+  deepScan: $<HTMLInputElement>("#deep-scan"),
+  verifySection: $<HTMLElement>("#verify-section"),
+  verifyImg: $<HTMLImageElement>("#verify-img"),
+  verifyStage: $<HTMLDivElement>("#verify-stage"),
+  verifyHitsLayer: $<HTMLDivElement>("#verify-hits-layer"),
+  verifyBannerEl: $<HTMLDivElement>("#verify-result-banner"),
+  verifyHitList: $<HTMLUListElement>("#verify-hit-list"),
+  verifyCount: $<HTMLSpanElement>("#verify-count"),
+  verifyEmpty: $<HTMLParagraphElement>("#verify-empty"),
+  verifyReportCard: $<HTMLDivElement>("#verify-report"),
+  verifyReportBody: $<HTMLDivElement>("#verify-report-body"),
+  verifyJsonBtn: $<HTMLButtonElement>("#verify-json-btn"),
+  verifyPrintBtn: $<HTMLButtonElement>("#verify-print-btn"),
+  verifyResetBtn: $<HTMLButtonElement>("#verify-reset-btn"),
   reportCard: $<HTMLDivElement>("#report-card"),
   reportBody: $<HTMLDivElement>("#report-body"),
   reportJsonBtn: $<HTMLButtonElement>("#report-json-btn"),
@@ -64,6 +98,25 @@ const state: AppState = {
   exportSha: null,
   report: null,
   hits: [],
+};
+
+/** State for the standalone "verify an existing image" path. */
+interface VerifyState {
+  objectUrl: string | null;
+  imageSha: string | null;
+  imageWidth: number;
+  imageHeight: number;
+  hits: VerifyHit[];
+  report: VerifyReport | null;
+}
+
+const vstate: VerifyState = {
+  objectUrl: null,
+  imageSha: null,
+  imageWidth: 0,
+  imageHeight: 0,
+  hits: [],
+  report: null,
 };
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -223,6 +276,7 @@ function removeBox(id: string) {
 }
 
 async function loadImage(file: Blob, name: string) {
+  resetVerify();
   if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
   state.objectUrl = URL.createObjectURL(file);
   state.fileName = name;
@@ -417,6 +471,7 @@ function reset() {
   state.hits = [];
   if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
   state.objectUrl = null;
+  resetVerify();
   els.reviewSection.hidden = true;
   els.exportSection.hidden = true;
   els.uploadSection.hidden = false;
@@ -427,6 +482,283 @@ function reset() {
   setStep("upload");
   status("Ready. Upload a screenshot to begin.");
 }
+
+// --- independent verify path ("verify an existing image") ---
+
+function rgbaFromImage(img: HTMLImageElement): RgbaImage {
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas 2D context unavailable");
+  ctx.drawImage(img, 0, 0);
+  const d = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  return { width: d.width, height: d.height, data: d.data };
+}
+
+function rgbaToCanvas(img: RgbaImage): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas 2D context unavailable");
+  ctx.putImageData(new ImageData(img.data, img.width, img.height), 0, 0);
+  return canvas;
+}
+
+async function loadVerifyImage(file: Blob) {
+  if (vstate.objectUrl) URL.revokeObjectURL(vstate.objectUrl);
+  vstate.objectUrl = URL.createObjectURL(file);
+  vstate.imageSha = await sha256Hex(await file.arrayBuffer());
+  const img = els.verifyImg;
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve();
+    img.onerror = () => reject(new Error("Could not decode image"));
+    img.src = vstate.objectUrl!;
+  });
+  vstate.imageWidth = img.naturalWidth;
+  vstate.imageHeight = img.naturalHeight;
+  await runVerify();
+}
+
+async function runVerify() {
+  if (!vstate.imageSha) return;
+  const deep = els.deepScan.checked;
+  const passesRun = ["standard"];
+  showSpinner("Auditing the uploaded pixels…");
+  status("Independent check: running local OCR on the file as uploaded");
+  try {
+    const res = await recognize(els.verifyImg, (_s, p) =>
+      updateSpinner(`OCR pass 1 (standard)… ${Math.round(p * 100)}%`),
+    );
+    const quality = assessOcrQuality(res.words);
+    let hits: VerifyHit[] = detectSensitive(res.words).map((d) => ({
+      category: d.category,
+      rule: d.rule,
+      confidence: d.confidence,
+      bbox: d.bbox,
+      passes: ["standard"],
+    }));
+
+    if (deep) {
+      passesRun.push("enhanced-2x");
+      const enhanced = rgbaToCanvas(upscale2x(enhanceContrast(rgbaFromImage(els.verifyImg))));
+      const res2 = await recognize(enhanced, (_s, p) =>
+        updateSpinner(`OCR pass 2 (enhanced, 2×)… ${Math.round(p * 100)}%`),
+      );
+      hits = hits.concat(
+        detectSensitive(res2.words).map((d) => ({
+          category: d.category,
+          rule: d.rule,
+          confidence: d.confidence,
+          bbox: {
+            x0: d.bbox.x0 / 2,
+            y0: d.bbox.y0 / 2,
+            x1: d.bbox.x1 / 2,
+            y1: d.bbox.y1 / 2,
+          },
+          passes: ["enhanced-2x"],
+        })),
+      );
+    }
+
+    hits = dedupeHits(hits);
+    vstate.hits = hits;
+    vstate.report = buildVerifyReport({
+      imageSha256: vstate.imageSha,
+      width: vstate.imageWidth,
+      height: vstate.imageHeight,
+      hits,
+      passesRun,
+      quality,
+    });
+
+    els.uploadSection.hidden = true;
+    els.reviewSection.hidden = true;
+    els.exportSection.hidden = true;
+    els.verifySection.hidden = false;
+    els.steps.hidden = true; // the step bar describes the redact pipeline
+    renderVerifyHits();
+    renderVerifyList();
+    els.verifyReportBody.innerHTML = verifySummaryHtml(vstate.report);
+    els.verifyReportCard.hidden = false;
+
+    const st = verifyStatus(hits, quality);
+    const banner = els.verifyBannerEl;
+    banner.hidden = false;
+    banner.classList.remove("warn", "inconclusive");
+    if (st === "hits-found") {
+      banner.classList.add("warn");
+      banner.innerHTML =
+        `<strong>${hits.length} residual detector hit${hits.length === 1 ? "" : "s"}</strong> — ` +
+        `the file you uploaded still triggers detectors (outlined on the image). ` +
+        `Do not share it as-is.` +
+        `<p class="sub">Hits are pattern matches in the categories listed in the audit — ` +
+        `verify them visually, and remember names/addresses aren't covered at all.</p>`;
+      status(`Verification complete: ${hits.length} residual detections.`);
+    } else if (st === "no-hits") {
+      banner.innerHTML =
+        `<strong>No detector hits</strong> in the uploaded pixels.` +
+        `<p class="sub">This means the 8 supported pattern types found nothing — it is ` +
+        `a check, not proof the image is clean. Names, addresses, DOBs, account numbers, ` +
+        `handwriting and QR/barcodes are not covered. Eyeball it before sharing.</p>`;
+      status("Verification complete: no residual detections.");
+    } else {
+      banner.classList.add("inconclusive");
+      banner.innerHTML =
+        `<strong>Inconclusive:</strong> no detector hits, but OCR confidence on this image ` +
+        `is low (${quality.wordCount} words, ${Math.round(quality.meanConfidence * 100)}% avg). ` +
+        `Faint or low-resolution text can read as "clean" — try the deeper scan and review ` +
+        `the image yourself before sharing.`;
+      status("Verification inconclusive: low OCR confidence.");
+    }
+    els.verifySection.scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (err) {
+    status(`Verification failed: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    hideSpinner();
+  }
+}
+
+function renderVerifyHits() {
+  els.verifyHitsLayer.innerHTML = "";
+  const natural = vstate.imageWidth || 1;
+  const scale = els.verifyImg.getBoundingClientRect().width / natural;
+  for (const h of vstate.hits) {
+    const div = document.createElement("div");
+    div.className = "hit";
+    div.title = `${CATEGORY_LABEL[h.category]} (${h.rule}) — via ${h.passes.join(", ")}`;
+    div.style.left = `${h.bbox.x0 * scale}px`;
+    div.style.top = `${h.bbox.y0 * scale}px`;
+    div.style.width = `${(h.bbox.x1 - h.bbox.x0) * scale}px`;
+    div.style.height = `${(h.bbox.y1 - h.bbox.y0) * scale}px`;
+    els.verifyHitsLayer.appendChild(div);
+  }
+}
+
+function renderVerifyList() {
+  els.verifyHitList.innerHTML = "";
+  els.verifyEmpty.hidden = vstate.hits.length !== 0;
+  els.verifyCount.textContent = String(vstate.hits.length);
+  for (const h of vstate.hits) {
+    const li = document.createElement("li");
+    li.className = "det-item";
+
+    const dot = document.createElement("span");
+    dot.className = "det-dot";
+    dot.style.background = `var(--cat-${h.category}, var(--accent-2))`;
+
+    const meta = document.createElement("span");
+    meta.className = "det-meta";
+    const cat = document.createElement("div");
+    cat.className = "cat";
+    cat.textContent = CATEGORY_LABEL[h.category];
+    const rule = document.createElement("div");
+    rule.className = "rule";
+    rule.textContent = h.rule;
+    meta.append(cat, rule);
+    for (const p of h.passes) {
+      const chip = document.createElement("span");
+      chip.className = "hit-pass";
+      chip.textContent = p;
+      rule.appendChild(document.createTextNode(" "));
+      rule.appendChild(chip);
+    }
+
+    const conf = document.createElement("span");
+    conf.className = "det-conf";
+    conf.textContent = `${Math.round(h.confidence * 100)}%`;
+
+    li.append(dot, meta, conf);
+    els.verifyHitList.appendChild(li);
+  }
+}
+
+function tryLoadVerify(file: Blob, name: string, mime: string) {
+  if (!isSupportedImageType(mime, name)) {
+    status(
+      `Unsupported file type (${mime || "unknown"}). The verifier accepts PNG or JPG — ` +
+        `convert PDFs to PNG first.`,
+    );
+    return;
+  }
+  loadVerifyImage(file).catch((err) =>
+    status(`Couldn't read that image: ${err instanceof Error ? err.message : String(err)}`),
+  );
+}
+
+function resetVerify() {
+  if (vstate.objectUrl) URL.revokeObjectURL(vstate.objectUrl);
+  vstate.objectUrl = null;
+  vstate.imageSha = null;
+  vstate.imageWidth = 0;
+  vstate.imageHeight = 0;
+  vstate.hits = [];
+  vstate.report = null;
+  els.verifySection.hidden = true;
+  els.verifyBannerEl.hidden = true;
+  els.verifyReportCard.hidden = true;
+  els.verifyHitsLayer.innerHTML = "";
+  els.verifyFileInput.value = "";
+  els.uploadSection.hidden = false;
+  els.steps.hidden = false;
+  setStep("upload");
+  status("Ready. Choose a path below to begin.");
+}
+
+els.verifyDropzone.addEventListener("click", () => els.verifyFileInput.click());
+els.verifyDropzone.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    els.verifyFileInput.click();
+  }
+});
+els.verifyFileInput.addEventListener("change", () => {
+  const f = els.verifyFileInput.files?.[0];
+  if (f) tryLoadVerify(f, f.name, f.type);
+});
+["dragover", "dragenter"].forEach((ev) =>
+  els.verifyDropzone.addEventListener(ev, (e) => {
+    e.preventDefault();
+    els.verifyDropzone.classList.add("dragover");
+  }),
+);
+["dragleave", "drop"].forEach((ev) =>
+  els.verifyDropzone.addEventListener(ev, (e) => {
+    e.preventDefault();
+    els.verifyDropzone.classList.remove("dragover");
+  }),
+);
+els.verifyDropzone.addEventListener("drop", (e) => {
+  const f = e.dataTransfer?.files?.[0];
+  if (f) tryLoadVerify(f, f.name, f.type);
+});
+
+els.verifyDemoBtn.addEventListener("click", async () => {
+  try {
+    const res = await fetch("demo-leaky.png");
+    if (!res.ok) throw new Error("demo-leaky.png missing");
+    const blob = await res.blob();
+    await loadVerifyImage(blob).catch((err) => status(String(err)));
+  } catch (err) {
+    status(`Demo load failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+});
+
+els.deepScan.addEventListener("change", () => {
+  if (vstate.imageSha) void runVerify();
+});
+els.verifyJsonBtn.addEventListener("click", () => {
+  if (!vstate.report) return;
+  download(
+    new Blob([verifyReportToJson(vstate.report)], { type: "application/json" }),
+    `redactproof-verify-${vstate.imageSha?.slice(0, 8) ?? "audit"}.json`,
+  );
+});
+els.verifyPrintBtn.addEventListener("click", () => window.print());
+els.verifyResetBtn.addEventListener("click", resetVerify);
+
+new ResizeObserver(() => renderVerifyHits()).observe(els.verifyStage);
 
 // --- manual box drawing ---
 let dragStart: { x: number; y: number } | null = null;
