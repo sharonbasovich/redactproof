@@ -169,6 +169,7 @@ function scaleFactor(): number {
 function renderBoxes() {
   const scale = scaleFactor();
   els.boxesLayer.innerHTML = "";
+  const tagRects: Array<{ x0: number; y0: number; x1: number; y1: number }> = [];
   for (const b of state.boxes) {
     const div = document.createElement("div");
     div.className = "box" + (b.enabled ? "" : " disabled") + (b.id === state.selectedId ? " selected" : "");
@@ -187,8 +188,44 @@ function renderBoxes() {
     );
     const tag = document.createElement("span");
     tag.className = "box-tag";
-    tag.textContent =
+    const label =
       CATEGORY_LABEL[b.category] + (b.confidence !== null ? ` ${Math.round(b.confidence * 100)}%` : "");
+    tag.textContent = label;
+    // De-collide tags on dense images: try above the box, then below, then
+    // tucked inside the box's top-left corner.
+    const tagW = label.length * 5.6 + 14; // ~9.9px font + padding, CSS px
+    const boxLeft = b.bbox.x0 * scale;
+    const boxTop = b.bbox.y0 * scale;
+    const boxH = (b.bbox.y1 - b.bbox.y0) * scale;
+    const candidates = [
+      { top: -20, left: -2 }, // above (default)
+      { top: boxH + 2, left: -2 }, // below
+      { top: 1, left: 1 }, // inside
+    ];
+    let placed = candidates[candidates.length - 1];
+    for (const c of candidates) {
+      const r = {
+        x0: boxLeft + c.left,
+        y0: boxTop + c.top,
+        x1: boxLeft + c.left + tagW,
+        y1: boxTop + c.top + 14,
+      };
+      const hitsPlaced = tagRects.some(
+        (t) => r.x0 < t.x1 && r.x1 > t.x0 && r.y0 < t.y1 && r.y1 > t.y0,
+      );
+      const offTop = r.y0 < 0;
+      if (!hitsPlaced && !offTop) {
+        placed = c;
+        tagRects.push(r);
+        break;
+      }
+    }
+    // the inside fallback only helps if the box is tall enough for a tag
+    if (placed === candidates[candidates.length - 1] && boxH < 16) {
+      tag.style.display = "none";
+    }
+    tag.style.top = `${placed.top}px`;
+    tag.style.left = `${placed.left}px`;
     div.appendChild(tag);
     els.boxesLayer.appendChild(div);
   }
