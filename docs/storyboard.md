@@ -1,29 +1,48 @@
-# RedactProof — 2-minute demo storyboard
+# RedactProof — refreshed demo storyboard (≤2:30)
 
-Target runtime ~2:00. One continuous take is fine; cuts marked **[CUT]** are
-optional trims if running long. Narration is a guide, not a script.
+Target runtime ~2:20. One continuous take; cuts marked **[CUT]** are optional
+trims. Narration is a guide, not a script. The new centerpiece is the
+**independent verifier** — shot 3 is the money shot.
 
 | # | Shot | Screen | Narration beat | ~Time |
 |---|------|--------|----------------|-------|
-| 1 | Cold open on landing page | Dropzone + "100% local" pill | "Screenshots leak PII all the time — and most people redact them wrong: translucent highlights, editable annotation layers, or a field they just missed." | 0:00–0:15 |
-| 2 | Click **Try the synthetic demo screenshot** | OCR spinner with % progress | "Everything runs in the browser — nothing is uploaded. Local OCR scans the image…" | 0:15–0:30 |
-| 3 | Review screen appears | ~10 labeled boxes over emails, cards, SSN, IP, token + sidebar list | "…and flags emails, phone numbers, payment cards — validated with the Luhn check, not just a regex — postal codes, SSNs, IPs, tokens." | 0:30–0:50 |
-| 4 | Interaction quickies | Toggle one box off, delete one, **drag a manual box** over the token (or any missed spot) | "Every box is editable — and you can cover anything the detector missed." | 0:50–1:05 |
-| 5 | Click **Redact & export PNG** | Before/after side-by-side, opaque black boxes | "Export burns opaque pixels into a fresh canvas — no reversible overlay, no source metadata." **[CUT]** | 1:05–1:15 |
-| 6 | Verification banner | "N residual hits" warn state *or* clean state | "Then the twist: it re-scans its own export. Anything left over gets caught here — that's what makes it Redact**Proof**." | 1:15–1:35 |
-| 7 | Audit report card + downloads | SHA-256, per-category counts, JSON/print buttons | "And you get a content-free audit report — SHA-256 of the export, counts, timestamp — proof the check happened, with no PII inside." | 1:35–1:50 |
-| 8 | Close | Footer disclaimer on screen | "It's honest about its limits too: a clean scan isn't a guarantee — OCR can miss handwriting and blurry text. Always eyeball the export." | 1:50–2:00 |
+| 1 | Cold open on landing | Two paths side by side + "100% local" pill | "Most redaction tools trust the editor. RedactProof checks the *pixels* — whether it redacted the image, or some other tool did." | 0:00–0:15 |
+| 2 | Click **Try the leaky-redaction demo** (verify path) | OCR spinner with % progress | "This screenshot was 'redacted' somewhere else. The card and ID look covered — everything runs locally, nothing uploads." | 0:15–0:30 |
+| 3 | **Verify results appear** | "2 residual detector hits" warn banner + outlined regions on the real image | "But look: the email was only covered by a translucent white-out — still readable. And the phone number in the sign-off was missed entirely. That's what you just almost shared." | 0:30–0:55 |
+| 4 | Sidebar + pass provenance | Hit list with category/rule/confidence + "standard" chips | "Each hit shows what fired and where — eight pattern rules, checked against the actual file." **[CUT]** | 0:55–1:05 |
+| 5 | Verification audit card | SHA-256, 1100×640 (filename omitted), hits table, limitations | "And the audit is deliberately minimal: the file's hash, counts, hit locations, detector limits. Detected strings and even the filename are never written into it." | 1:05–1:20 |
+| 6 | Path A quick pass: **Try the synthetic demo** → de-collided labels → Redact & export | Review screen with ~10 labeled boxes; before/after export | "When RedactProof does the redaction itself, it burns opaque pixels into a fresh canvas — no reversible overlay." **[CUT the review dwell]** | 1:20–1:50 |
+| 7 | Export verification + report | "Verification clean" banner + audit report | "Then it re-scans its own export. Clean means the detectors found nothing — not that nothing could ever be missed." | 1:50–2:10 |
+| 8 | Close | Footer disclaimer / honest-limitations | "It's honest about limits: names, addresses, handwriting, QR codes aren't covered — mask those yourself. Redact it. Then prove you checked." | 2:10–2:20 |
 
 ## Demo choreography notes
 
-- The strongest single beat is shot 6 in the **warn state**: leave one email
-  disabled before exporting so the banner shows "1 residual hit" — it proves the
-  verification pass genuinely works, then point out you can just widen a box and
-  re-export.
+- Shot 3 is the core demo moment: an apparently covered screenshot still has
+  readable email text, and the independent final-file check flags it before
+  sharing. Linger on the outlined region.
+- The leaky fixture is synthetic: `jane.public@example.com` under a ~40%
+  white-out rectangle, `(416) 555-0142` missed in the sign-off, opaque boxes
+  over card + SSN (which correctly do *not* fire).
+- For a second beat in shot 4, re-run with **Deeper scan** checked: the audit
+  shows `standard → enhanced-2x` passes and each hit gains an `enhanced-2x`
+  provenance chip — proves the contrast/upscale pass works and dedupe merges.
 - If network conditions matter, open DevTools first: every request is
   same-origin (`/vendor`, `/lang`) — a good visual for the "no third-party
   runtime" claim.
-- All demo data is synthetic: test PANs, the Woolworth SSN, a 555 number,
-  TEST-NET-3 IP, example.com emails.
-- Recording asset (golden-path run): see `docs/` or the session attachments —
-  `rec-*.mp4` covers shots 1–8 except the warn-state variant.
+- Wording that keeps us honest: say "omits detected strings and the filename",
+  never "contains no personal information"; say "a check ran", never "proof
+  the image is clean"; the verifier reads pixels, it can't recover truly
+  burned ones or guarantee coverage.
+- Screenshots of this flow live in `docs/screenshots/`:
+  `landing-two-paths.png`, `verify-leaky-flagged.png`, `verify-deep-scan.png`,
+  `review-de-collided-tags.png`, `export-clean-audit.png`.
+
+## Reference hashes (this build)
+
+- `fixtures/leaky-redaction.png` / `public/demo-leaky.png` image SHA-256 as
+  reported by the verifier: `90ac2ac90d11e4e97e8a387349aabf53adafbd7bdecbb985f57cd0b520794c32`
+  (matches `sha256sum` of the file — it hashes the uploaded bytes verbatim).
+- Redact-path export PNG SHA-256 from the golden-path run:
+  `8e75b14e258e0641f4bf2fdc59b8bdabe4357e9fc312a28ab672ca590f84eea4`
+  (PNG re-encode is deterministic in this build, but treat export hashes as
+  run-specific, not fixture constants).
