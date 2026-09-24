@@ -225,12 +225,48 @@ h1 { font-size: 1.5rem; margin: 0; letter-spacing: -0.02em; }
 @media print {
   body { background: #fff; }
   .site-header, .steps, #upload-section, .work-area, .card-head, .compare,
-  .verify-banner, .site-footer, .spinner, .det-list, .deep-scan { display: none !important; }
-  #verify-section { display: block !important; color: #000; }
+  .verify-banner, .site-footer, .spinner, .det-list, .deep-scan, .grade-panel,
+  .fix-panel { display: none !important; }
+  /* honor [hidden]: only the section actually in view prints */
+  #verify-section { color: #000; }
   #verify-report { border: none; color: #000; }
   .card { border: none; background: #fff; color: #000; }
-  #export-section { display: block !important; color: #000; }
+  #export-section { color: #000; }
   #report-card { border: none; color: #000; }
   .report-dl dt, .muted, .disclaimer { color: #333; }
   .report-table th, .report-table td { border-color: #999; }
+}
+
+/* --- red-team audit UI --- */
+.grade-panel {
+  display: flex; align-items: flex-start; gap: 14px;
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 16px; margin: 0 0 14px;
+}
+.grade-panel .grade-letter {
+  font-size: 2rem; font-weight: 800; line-height: 1;
+  padding: 6px 12px; border-radius: 8px; border: 2px solid currentColor;
+}
+.grade-panel.g-f { border-color: var(--danger, #f87171); }
+.grade-panel.g-f .grade-letter { color: #f87171; }
+.grade-panel.g-c .grade-letter { color: var(--warn); }
+.grade-panel.g-b .grade-letter { color: var(--accent-2); }
+.grade-panel .grade-reasons { margin: 0; padding-left: 18px; font-size: 0.85rem; color: var(--muted); }
+.grade-panel .grade-reasons li { margin: 2px 0; }
+
+.fix-panel {
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 14px 16px; margin: 0 0 14px;
+}
+.fix-panel h3 { margin: 0 0 10px; font-size: 0.95rem; }
+.fix-compare img { max-height: 220px; }
+
+.masked-text {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.78rem; color: var(--muted); letter-spacing: 0.5px;
+}
+.masked-text.revealed { color: var(--warn); }
+.reveal-btn {
+  background: none; border: none; color: var(--accent-2); cursor: pointer;
+  font-size: 0.72rem; padding: 0 4px; text-decoration: underline;
 }

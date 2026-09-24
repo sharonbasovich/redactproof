@@ -42,11 +42,11 @@ function bboxIoU(a: BBox, b: BBox): number {
 }
 
 /**
- * Merge hits that multiple passes report for the same region: same category
- * and overlapping boxes (IoU > 0.25, or one's center inside the other — deep
- * passes run at 2x then get mapped back, so boundaries shift slightly).
+ * Merge hits that multiple variants report for the same region: same category
+ * and overlapping boxes (IoU > 0.25, or one's center inside the other — attack
+ * variants run at 2x then get mapped back, so boundaries shift slightly).
  * The merged hit keeps the highest confidence, a union bbox, and the list of
- * passes that found it.
+ * attack variants that found it.
  */
 export function dedupeHits(hits: VerifyHit[]): VerifyHit[] {
   const merged: VerifyHit[] = [];
@@ -67,15 +67,30 @@ export function dedupeHits(hits: VerifyHit[]): VerifyHit[] {
         x1: Math.max(existing.bbox.x1, h.bbox.x1),
         y1: Math.max(existing.bbox.y1, h.bbox.y1),
       };
-      for (const p of h.passes) {
-        if (!existing.passes.includes(p)) existing.passes.push(p);
+      for (const p of h.attackIds) {
+        if (!existing.attackIds.includes(p)) existing.attackIds.push(p);
       }
     } else {
-      merged.push({ ...h, passes: [...h.passes] });
+      merged.push({ ...h, attackIds: [...h.attackIds] });
     }
   }
   merged.sort((a, b) => a.bbox.y0 - b.bbox.y0 || a.bbox.x0 - b.bbox.x0);
   return merged;
+}
+
+/**
+ * Pad an OCR-tight bbox before burning it: glyph boxes hug the text, so the
+ * opaque cover needs margin (~6% of box size, min 4px), clamped to the image.
+ */
+export function padHitBbox(bbox: BBox, width: number, height: number): BBox {
+  const px = Math.max(4, Math.round((bbox.x1 - bbox.x0) * 0.06));
+  const py = Math.max(4, Math.round((bbox.y1 - bbox.y0) * 0.25));
+  return {
+    x0: Math.max(0, bbox.x0 - px),
+    y0: Math.max(0, bbox.y0 - py),
+    x1: Math.min(width, bbox.x1 + px),
+    y1: Math.min(height, bbox.y1 + py),
+  };
 }
 
 export function verifyStatus(hits: VerifyHit[], quality: OcrQuality): VerifyStatus {
@@ -89,8 +104,11 @@ export function buildVerifyReport(args: {
   width: number;
   height: number;
   hits: VerifyHit[];
-  passesRun: string[];
+  engine: string;
+  attacksRun: string[];
+  grade: { letter: "A" | "B" | "C" | "F"; reasons: string[] };
   quality: OcrQuality;
+  fix?: { fromSha256: string; boxesBurned: number; priorStatus: VerifyStatus; priorHits: number };
   now?: Date;
 }): VerifyReport {
   return {
@@ -105,7 +123,9 @@ export function buildVerifyReport(args: {
     },
     check: {
       status: verifyStatus(args.hits, args.quality),
-      passesRun: args.passesRun,
+      engine: args.engine,
+      attacksRun: args.attacksRun,
+      grade: args.grade,
       ocrWords: args.quality.wordCount,
       ocrMeanConfidence: Number(args.quality.meanConfidence.toFixed(3)),
       lowOcrConfidence: args.quality.suspicious,
@@ -115,9 +135,10 @@ export function buildVerifyReport(args: {
         rule: h.rule,
         confidence: Number(h.confidence.toFixed(3)),
         bbox: h.bbox,
-        passes: h.passes,
+        attackIds: h.attackIds,
       })),
     },
+    ...(args.fix ? { fix: args.fix } : {}),
     detectorScope: DETECTOR_SCOPE,
     limitations: VERIFY_LIMITATIONS,
   };
@@ -142,23 +163,35 @@ export function verifySummaryHtml(report: VerifyReport): string {
       (h) =>
         `<tr><td>${esc(h.category)}</td><td>${esc(h.rule)}</td>` +
         `<td>${Math.round(h.confidence * 100)}%</td>` +
-        `<td>${esc(h.passes.join(", "))}</td></tr>`,
+        `<td>${esc(h.attackIds.join(", "))}</td></tr>`,
     )
     .join("");
   const hitsTable = report.check.hits.length
     ? `<table class="report-table"><thead><tr><th>Category</th><th>Rule</th><th>Conf</th><th>Found by</th></tr></thead><tbody>${rows}</tbody></table>`
     : `<p class="muted">No detector hits.</p>`;
+  const fixRow = report.fix
+    ? `<dt>Fix provenance</dt><dd>${report.fix.boxesBurned} opaque box${
+        report.fix.boxesBurned === 1 ? "" : "es"
+      } burned over sha ${esc(report.fix.fromSha256.slice(0, 16))}… (was: ${
+        STATUS_LABEL[report.fix.priorStatus]
+      })</dd>`
+    : "";
   return `
     <dl class="report-dl">
       <dt>Generated</dt><dd>${esc(report.generatedAt)}</dd>
       <dt>Image</dt><dd>${report.image.pixelWidth}×${report.image.pixelHeight}px (filename omitted)</dd>
       <dt>Image SHA-256</dt><dd class="mono">${esc(report.image.sha256)}</dd>
       <dt>Status</dt><dd>${STATUS_LABEL[report.check.status]}</dd>
-      <dt>OCR passes</dt><dd>${esc(report.check.passesRun.join(" → "))}</dd>
+      <dt>Grade</dt><dd>${esc(report.check.grade.letter)} — ${esc(
+        report.check.grade.reasons.join(" "),
+      )}</dd>
+      <dt>Engine</dt><dd>${esc(report.check.engine)}</dd>
+      <dt>Attack variants</dt><dd>${esc(report.check.attacksRun.join(" → "))}</dd>
       <dt>OCR quality</dt><dd>${report.check.ocrWords} words, ${Math.round(
         report.check.ocrMeanConfidence * 100,
       )}% avg confidence${report.check.lowOcrConfidence ? " — low" : ""}</dd>
       <dt>Residual hits</dt><dd>${report.check.residualHits}</dd>
+      ${fixRow}
     </dl>
     ${hitsTable}
     <p class="disclaimer">${esc(report.limitations)}</p>`;

@@ -63,9 +63,9 @@
             </div>
 
             <div class="path-card">
-              <h2>Verify an existing image</h2>
+              <h2>Red-team an existing image</h2>
               <p class="muted">
-                Redacted it in another tool? Audit the <em>actual file</em> before you share it.
+                Redacted it in another tool? Attack the <em>actual file</em> and see what still leaks.
               </p>
               <div
                 id="verify-dropzone"
@@ -83,7 +83,7 @@
               </div>
               <label class="deep-scan">
                 <input id="deep-scan" type="checkbox" />
-                <span>Deeper scan (slower) — also OCR a contrast-enhanced, upscaled pass to catch faint or low-contrast text</span>
+                <span>All attack variants (slower) — also run contrast/upscale transforms to recover faint or covered text</span>
               </label>
               <div class="demo-row">
                 <button id="verify-demo-btn" class="btn ghost" type="button">Try the leaky-redaction demo</button>
@@ -95,14 +95,33 @@
 
         <section id="verify-section" class="card" hidden>
           <div class="card-head">
-            <h2>Independent check &mdash; the file you uploaded</h2>
+            <h2>Red-team audit &mdash; the file you uploaded</h2>
             <div class="card-actions">
+              <button id="verify-fix-btn" class="btn primary" type="button" hidden>Fix it — burn opaque boxes &amp; re-check</button>
               <button id="verify-json-btn" class="btn" type="button">Download audit JSON</button>
               <button id="verify-print-btn" class="btn" type="button">Print report</button>
               <button id="verify-reset-btn" class="btn ghost" type="button">Start over</button>
             </div>
           </div>
           <div id="verify-result-banner" class="verify-banner" hidden></div>
+          <div id="verify-grade" class="grade-panel" hidden></div>
+          <div id="verify-fix-panel" class="fix-panel" hidden>
+            <h3>Opaque fix applied &mdash; re-checking the fixed pixels</h3>
+            <div class="compare fix-compare">
+              <figure>
+                <figcaption>Flagged file</figcaption>
+                <img id="fix-before" alt="Uploaded image before the opaque fix" />
+              </figure>
+              <figure>
+                <figcaption>Burned export</figcaption>
+                <img id="fix-after" alt="Same image with opaque boxes burned over flagged regions" />
+              </figure>
+            </div>
+            <div class="card-actions">
+              <button id="fix-download-btn" class="btn" type="button">Download fixed PNG</button>
+            </div>
+            <p class="muted">Opaque burn replaces the pixels outright — nothing underneath survives or can be peeled off.</p>
+          </div>
           <div class="work-area">
             <div class="stage-wrap">
               <div id="verify-stage" class="stage" aria-label="Uploaded image with residual detections outlined">

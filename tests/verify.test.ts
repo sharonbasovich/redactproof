@@ -14,9 +14,11 @@ import { assessOcrQuality, detectSensitive } from "../src/detect";
 import { recognize, terminateOcr } from "../src/ocr";
 import { enhanceContrast, upscale2x, type RgbaImage } from "../src/preprocess";
 import { sha256Hex } from "../src/redact";
+import { grade as attackGrade, runAttacks, type Raster } from "../src/redteam-mock";
 import {
   buildVerifyReport,
   dedupeHits,
+  padHitBbox,
   verifyReportToJson,
   verifyStatus,
 } from "../src/verify";
@@ -79,31 +81,49 @@ describe("dedupeHits", () => {
     rule: "rfc5322-lite",
     confidence: 0.8,
     bbox: { x0: 10, y0: 10, x1: 100, y1: 30 },
-    passes: ["standard"],
+    attackIds: ["identity"],
   };
 
-  it("merges same-category overlapping hits and unions passes", () => {
+  it("merges same-category overlapping hits and unions attack ids", () => {
     const shifted: VerifyHit = {
       ...base,
       confidence: 0.9,
       bbox: { x0: 12, y0: 11, x1: 102, y1: 31 },
-      passes: ["enhanced-2x"],
+      attackIds: ["upscale-sharpen"],
     };
     const out = dedupeHits([base, shifted]);
     expect(out).toHaveLength(1);
-    expect(out[0].passes.sort()).toEqual(["enhanced-2x", "standard"]);
+    expect(out[0].attackIds.sort()).toEqual(["identity", "upscale-sharpen"]);
     expect(out[0].confidence).toBe(0.9);
     expect(out[0].bbox).toEqual({ x0: 10, y0: 10, x1: 102, y1: 31 });
   });
 
   it("keeps different categories and distant boxes separate", () => {
-    const otherCat: VerifyHit = { ...base, category: "phone", passes: ["standard"] };
+    const otherCat: VerifyHit = { ...base, category: "phone", attackIds: ["identity"] };
     const far: VerifyHit = {
       ...base,
       bbox: { x0: 10, y0: 300, x1: 100, y1: 320 },
-      passes: ["enhanced-2x"],
+      attackIds: ["upscale-sharpen"],
     };
     expect(dedupeHits([base, otherCat, far])).toHaveLength(3);
+  });
+});
+
+describe("padHitBbox", () => {
+  it("pads OCR-tight boxes with margin and stays inside the image", () => {
+    const out = padHitBbox({ x0: 50, y0: 50, x1: 150, y1: 70 }, 1100, 640);
+    expect(out.x0).toBeLessThan(50);
+    expect(out.y0).toBeLessThan(50);
+    expect(out.x1).toBeGreaterThan(150);
+    expect(out.y1).toBeGreaterThan(70);
+  });
+
+  it("clamps to image edges", () => {
+    const out = padHitBbox({ x0: 0, y0: 0, x1: 40, y1: 12 }, 100, 50);
+    expect(out.x0).toBe(0);
+    expect(out.y0).toBe(0);
+    expect(out.x1).toBeLessThanOrEqual(100);
+    expect(out.y1).toBeLessThanOrEqual(50);
   });
 });
 
@@ -130,7 +150,7 @@ describe("verifyStatus / low OCR confidence", () => {
       rule: "rfc5322-lite",
       confidence: 0.9,
       bbox: { x0: 0, y0: 0, x1: 10, y1: 8 },
-      passes: ["standard"],
+      attackIds: ["identity"],
     };
     expect(verifyStatus([hit], q)).toBe("hits-found");
     expect(verifyStatus([], q)).toBe("no-hits");
@@ -147,7 +167,7 @@ describe("leaky fixture — independent verify catches what 'redaction' missed",
         rule: d.rule,
         confidence: d.confidence,
         bbox: d.bbox,
-        passes: ["standard"],
+        attackIds: ["identity"],
       }));
       const cats = new Set(hits.map((h) => h.category));
       expect(cats.has("email")).toBe(true);
@@ -189,7 +209,7 @@ describe("leaky fixture — independent verify catches what 'redaction' missed",
           rule: d.rule,
           confidence: d.confidence,
           bbox: d.bbox,
-          passes: ["standard"],
+          attackIds: ["identity"],
         })),
       );
       const quality = assessOcrQuality(res.words);
@@ -198,11 +218,14 @@ describe("leaky fixture — independent verify catches what 'redaction' missed",
         width: 1100,
         height: 640,
         hits,
-        passesRun: ["standard"],
+        engine: "redteam-mock",
+        attacksRun: ["identity"],
+        grade: { letter: "F", reasons: ["2 supported patterns recovered"] },
         quality,
         now: new Date("2026-09-24T00:00:00Z"),
       });
       expect(report.check.status).toBe("hits-found");
+      expect(report.check.grade.letter).toBe("F");
       const json = verifyReportToJson(report);
       for (const leaked of [
         "jane.public@example.com",
@@ -215,4 +238,119 @@ describe("leaky fixture — independent verify catches what 'redaction' missed",
     },
     180_000,
   );
+
+  it("fix provenance chains the flagged hash into the re-check report", async () => {
+    const report = buildVerifyReport({
+      imageSha256: "a".repeat(64),
+      width: 1100,
+      height: 640,
+      hits: [],
+      engine: "redteam-mock",
+      attacksRun: ["identity"],
+      grade: { letter: "B", reasons: ["not flagged"] },
+      quality: { wordCount: 40, meanConfidence: 0.9, suspicious: false },
+      fix: {
+        fromSha256: "90ac2ac90d11e4e97e8a387349aabf53adafbd7bdecbb985f57cd0b520794c32",
+        boxesBurned: 2,
+        priorStatus: "hits-found",
+        priorHits: 2,
+      },
+    });
+    const json = verifyReportToJson(report);
+    expect(report.fix?.boxesBurned).toBe(2);
+    expect(json).toContain("fromSha256");
+    expect(json).toContain("90ac2ac9");
+  });
+});
+
+describe("red-team mock engine (contract stand-in)", () => {
+  const doors = {
+    ocrInputFor: (r: Raster) =>
+      PNG.sync.write(pngOf({ ...r } as RgbaImage)),
+  };
+
+  it(
+    "runAttacks flags the leaky fixture and hits carry attack provenance",
+    async () => {
+      const png = PNG.sync.read(readFileSync(FIXTURE));
+      const run = await runAttacks(toRgba(png), doors);
+      expect(run.variants.map((v) => v.id)).toContain("identity");
+      expect(run.hits.length).toBeGreaterThan(0);
+      expect(
+        run.hits.every((h) => (h.attackIds ?? [h.attackId]).length > 0),
+      ).toBe(true);
+      expect(run.hits.some((h) => h.detection.category === "email")).toBe(true);
+      expect(run.elapsedMs).toBeGreaterThanOrEqual(0);
+    },
+    240_000,
+  );
+
+  it(
+    "identity-only run is honored and the deep variant adds provenance",
+    async () => {
+      const png = PNG.sync.read(readFileSync(FIXTURE));
+      const shallow = await runAttacks(toRgba(png), doors, {
+        variants: ["identity"],
+      });
+      expect(shallow.variants.map((v) => v.id)).toEqual(["identity"]);
+      const deep = await runAttacks(toRgba(png), doors, {
+        variants: ["identity", "upscale-sharpen"],
+      });
+      expect(deep.variants.map((v) => v.id)).toEqual([
+        "identity",
+        "upscale-sharpen",
+      ]);
+    },
+    240_000,
+  );
+
+  it("mock grade is honest: F on hits, never an A", () => {
+    const withHits = attackGrade(
+      {
+        variants: [],
+        hits: [
+          {
+            attackId: "identity",
+            detection: {
+              category: "email",
+              rule: "rfc5322-lite",
+              text: "x@y.z",
+              confidence: 0.9,
+              wordIndices: [0],
+              bbox: { x0: 0, y0: 0, x1: 10, y1: 8 },
+            },
+          },
+        ],
+        recoveredWords: 50,
+        elapsedMs: 1,
+        ocrQuality: { wordCount: 50, meanConfidence: 0.9, suspicious: false },
+      },
+      false,
+    );
+    expect(withHits.letter).toBe("F");
+    const clean = attackGrade(
+      {
+        variants: [],
+        hits: [],
+        recoveredWords: 50,
+        elapsedMs: 1,
+        ocrQuality: { wordCount: 50, meanConfidence: 0.9, suspicious: false },
+      },
+      false,
+    );
+    expect(clean.letter).toBe("B");
+    // a clean run must hedge — "not flagged" wording, never a bare "safe"
+    expect(clean.reasons.join(" ")).toMatch(/not (the same as )?safe|not a guarantee/i);
+    const shaky = attackGrade(
+      {
+        variants: [],
+        hits: [],
+        recoveredWords: 3,
+        elapsedMs: 1,
+        ocrQuality: { wordCount: 3, meanConfidence: 0.3, suspicious: true },
+      },
+      true,
+    );
+    expect(shaky.letter).toBe("C");
+  });
 });

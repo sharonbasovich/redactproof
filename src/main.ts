@@ -1,12 +1,20 @@
 import "./style.css";
 import { assessOcrQuality, detectSensitive, isSupportedImageType } from "./detect";
 import { recognize } from "./ocr";
-import { enhanceContrast, upscale2x, type RgbaImage } from "./preprocess";
+import type { RgbaImage } from "./preprocess";
 import { burnRedactions, canvasToPngBlob, sha256Hex } from "./redact";
+// Engine seam: when the attack engine lands (src/redteam/*), these imports
+// repoint at it and this file's logic stays unchanged.
+import {
+  grade as attackGrade,
+  runAttacks,
+  type AttackRunResult,
+  type Raster,
+} from "./redteam-mock";
 import { APP_VERSION, buildAuditReport, reportSummaryHtml, reportToJson } from "./report";
 import {
   buildVerifyReport,
-  dedupeHits,
+  padHitBbox,
   verifyReportToJson,
   verifyStatus,
   verifySummaryHtml,
@@ -60,6 +68,12 @@ const els = {
   verifyHitList: $<HTMLUListElement>("#verify-hit-list"),
   verifyCount: $<HTMLSpanElement>("#verify-count"),
   verifyEmpty: $<HTMLParagraphElement>("#verify-empty"),
+  verifyGradeEl: $<HTMLDivElement>("#verify-grade"),
+  verifyFixBtn: $<HTMLButtonElement>("#verify-fix-btn"),
+  verifyFixPanel: $<HTMLDivElement>("#verify-fix-panel"),
+  fixBefore: $<HTMLImageElement>("#fix-before"),
+  fixAfter: $<HTMLImageElement>("#fix-after"),
+  fixDownloadBtn: $<HTMLButtonElement>("#fix-download-btn"),
   verifyReportCard: $<HTMLDivElement>("#verify-report"),
   verifyReportBody: $<HTMLDivElement>("#verify-report-body"),
   verifyJsonBtn: $<HTMLButtonElement>("#verify-json-btn"),
@@ -100,7 +114,7 @@ const state: AppState = {
   hits: [],
 };
 
-/** State for the standalone "verify an existing image" path. */
+/** State for the standalone "red-team an existing image" path. */
 interface VerifyState {
   objectUrl: string | null;
   imageSha: string | null;
@@ -108,6 +122,14 @@ interface VerifyState {
   imageHeight: number;
   hits: VerifyHit[];
   report: VerifyReport | null;
+  /** Last attack run (variants/hits/timing) for the current image. */
+  run: AttackRunResult | null;
+  /** PNG bytes of the most recent opaque-fix export (for download). */
+  fixedPng: Uint8Array | null;
+  /** Provenance when the current image is itself a fix of an earlier one. */
+  priorFix: { fromSha256: string; boxesBurned: number } | null;
+  /** Indices of hits whose recovered text the user chose to reveal. */
+  revealed: Set<number>;
 }
 
 const vstate: VerifyState = {
@@ -117,7 +139,16 @@ const vstate: VerifyState = {
   imageHeight: 0,
   hits: [],
   report: null,
+  run: null,
+  fixedPng: null,
+  priorFix: null,
+  revealed: new Set(),
 };
+
+/** Images above this many pixels are refused up front (rasterization is 4B/px). */
+const MAX_VERIFY_PIXELS = 24_000_000;
+/** Above this many pixels the 2x attack variants are skipped (OOM/hang guard). */
+const MAX_ATTACK_PIXELS = 6_000_000;
 
 const CATEGORY_LABEL: Record<string, string> = {
   email: "Email",
@@ -544,70 +575,84 @@ function rgbaToCanvas(img: RgbaImage): HTMLCanvasElement {
 }
 
 async function loadVerifyImage(file: Blob) {
-  if (vstate.objectUrl) URL.revokeObjectURL(vstate.objectUrl);
-  vstate.objectUrl = URL.createObjectURL(file);
-  vstate.imageSha = await sha256Hex(await file.arrayBuffer());
+  const objectUrl = URL.createObjectURL(file);
   const img = els.verifyImg;
   await new Promise<void>((resolve, reject) => {
     img.onload = () => resolve();
     img.onerror = () => reject(new Error("Could not decode image"));
-    img.src = vstate.objectUrl!;
+    img.src = objectUrl;
   });
   vstate.imageWidth = img.naturalWidth;
   vstate.imageHeight = img.naturalHeight;
+  if (vstate.imageWidth * vstate.imageHeight > MAX_VERIFY_PIXELS) {
+    URL.revokeObjectURL(objectUrl);
+    status(
+      `Image is too large to audit (${vstate.imageWidth}×${vstate.imageHeight}). ` +
+        `Resize below ${Math.round(MAX_VERIFY_PIXELS / 1_000_000)}MP and try again.`,
+    );
+    return;
+  }
+  if (vstate.objectUrl) URL.revokeObjectURL(vstate.objectUrl);
+  vstate.objectUrl = objectUrl;
+  vstate.imageSha = await sha256Hex(await file.arrayBuffer());
+  vstate.revealed.clear();
   await runVerify();
 }
 
 async function runVerify() {
   if (!vstate.imageSha) return;
-  const deep = els.deepScan.checked;
-  const passesRun = ["standard"];
-  showSpinner("Auditing the uploaded pixels…");
-  status("Independent check: running local OCR on the file as uploaded");
+  const pixels = vstate.imageWidth * vstate.imageHeight;
+  const wantsDeep = els.deepScan.checked;
+  const deepOk = wantsDeep && pixels <= MAX_ATTACK_PIXELS;
+  showSpinner("Attacking the uploaded pixels…");
+  status("Red-team check: running attack variants + local OCR on the file");
   try {
-    const res = await recognize(els.verifyImg, (_s, p) =>
-      updateSpinner(`OCR pass 1 (standard)… ${Math.round(p * 100)}%`),
-    );
-    const quality = assessOcrQuality(res.words);
-    let hits: VerifyHit[] = detectSensitive(res.words).map((d) => ({
-      category: d.category,
-      rule: d.rule,
-      confidence: d.confidence,
-      bbox: d.bbox,
-      passes: ["standard"],
-    }));
-
-    if (deep) {
-      passesRun.push("enhanced-2x");
-      const enhanced = rgbaToCanvas(upscale2x(enhanceContrast(rgbaFromImage(els.verifyImg))));
-      const res2 = await recognize(enhanced, (_s, p) =>
-        updateSpinner(`OCR pass 2 (enhanced, 2×)… ${Math.round(p * 100)}%`),
-      );
-      hits = hits.concat(
-        detectSensitive(res2.words).map((d) => ({
-          category: d.category,
-          rule: d.rule,
-          confidence: d.confidence,
-          bbox: {
-            x0: d.bbox.x0 / 2,
-            y0: d.bbox.y0 / 2,
-            x1: d.bbox.x1 / 2,
-            y1: d.bbox.y1 / 2,
-          },
-          passes: ["enhanced-2x"],
-        })),
+    const raster: Raster = rgbaFromImage(els.verifyImg);
+    const doors = { ocrInputFor: (r: Raster) => rgbaToCanvas(r as RgbaImage) };
+    const run = await runAttacks(raster, doors, {
+      // identity always runs; deep variants only when the checkbox is on and
+      // the image is small enough to transform without blowing memory
+      variants: deepOk ? undefined : ["identity"],
+      onProgress: (id, p) =>
+        updateSpinner(`Attack ${id}… ${Math.round(p * 100)}%`),
+    });
+    if (wantsDeep && !deepOk) {
+      status(
+        `Image is ${vstate.imageWidth}×${vstate.imageHeight} — skipped the 2× attack ` +
+          `variants (memory guard); identity scan still ran.`,
       );
     }
-
-    hits = dedupeHits(hits);
+    vstate.run = run;
+    const quality = run.ocrQuality;
+    const hits: VerifyHit[] = run.hits.map((h) => ({
+      category: h.detection.category,
+      rule: h.detection.rule,
+      confidence: h.detection.confidence,
+      bbox: h.detection.bbox,
+      attackIds: h.attackIds ?? [h.attackId],
+      text: h.detection.text,
+    }));
     vstate.hits = hits;
+    const g = attackGrade(run, quality.suspicious);
     vstate.report = buildVerifyReport({
       imageSha256: vstate.imageSha,
       width: vstate.imageWidth,
       height: vstate.imageHeight,
       hits,
-      passesRun,
+      engine: "redteam-mock",
+      attacksRun: run.variants.map((v) => v.id),
+      grade: g,
       quality,
+      // priorFix is only set right after a fix, when vstate.report still
+      // holds the flagged file's report — so prior status/hits come from it
+      fix:
+        vstate.priorFix && vstate.report
+          ? {
+              ...vstate.priorFix,
+              priorStatus: vstate.report.check.status,
+              priorHits: vstate.report.check.residualHits,
+            }
+          : undefined,
     });
 
     els.uploadSection.hidden = true;
@@ -620,41 +665,106 @@ async function runVerify() {
     els.verifyReportBody.innerHTML = verifySummaryHtml(vstate.report);
     els.verifyReportCard.hidden = false;
 
+    // grade panel: letter + honest reasons (F / C / B — never "safe")
+    const gp = els.verifyGradeEl;
+    gp.hidden = false;
+    gp.className = `grade-panel g-${g.letter.toLowerCase()}`;
+    gp.innerHTML =
+      `<span class="grade-letter">${g.letter}</span>` +
+      `<ul class="grade-reasons">${g.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>`;
+
     const st = verifyStatus(hits, quality);
     const banner = els.verifyBannerEl;
     banner.hidden = false;
     banner.classList.remove("warn", "inconclusive");
+    els.verifyFixBtn.hidden = st !== "hits-found";
     if (st === "hits-found") {
       banner.classList.add("warn");
       banner.innerHTML =
-        `<strong>${hits.length} residual detector hit${hits.length === 1 ? "" : "s"}</strong> — ` +
-        `the file you uploaded still triggers detectors (outlined on the image). ` +
+        `<strong>${hits.length} recoverable pattern${hits.length === 1 ? "" : "s"}</strong> — ` +
+        `attack variants recovered text under the cover-up (outlined on the image). ` +
         `Do not share it as-is.` +
         `<p class="sub">Hits are pattern matches in the categories listed in the audit — ` +
         `verify them visually, and remember names/addresses aren't covered at all.</p>`;
-      status(`Verification complete: ${hits.length} residual detections.`);
+      status(`Red-team check complete: ${hits.length} recoverable patterns.`);
     } else if (st === "no-hits") {
       banner.innerHTML =
-        `<strong>No detector hits</strong> in the uploaded pixels.` +
-        `<p class="sub">This means the 8 supported pattern types found nothing — it is ` +
-        `a check, not proof the image is clean. Names, addresses, DOBs, account numbers, ` +
-        `handwriting and QR/barcodes are not covered. Eyeball it before sharing.</p>`;
-      status("Verification complete: no residual detections.");
+        `<strong>Not flagged by these checks</strong> — no supported patterns recovered.` +
+        `<p class="sub">That is not the same as safe: only the 8 pattern types were tested. ` +
+        `Names, addresses, DOBs, account numbers, handwriting and QR/barcodes are not ` +
+        `covered. Eyeball it before sharing.</p>`;
+      status("Red-team check complete: nothing recovered.");
     } else {
       banner.classList.add("inconclusive");
       banner.innerHTML =
-        `<strong>Inconclusive:</strong> no detector hits, but OCR confidence on this image ` +
+        `<strong>Inconclusive:</strong> nothing recovered, but OCR confidence on this image ` +
         `is low (${quality.wordCount} words, ${Math.round(quality.meanConfidence * 100)}% avg). ` +
-        `Faint or low-resolution text can read as "clean" — try the deeper scan and review ` +
-        `the image yourself before sharing.`;
-      status("Verification inconclusive: low OCR confidence.");
+        `Faint or low-resolution text can read as "clean" — try the attack variants and ` +
+        `review the image yourself before sharing.`;
+      status("Red-team check inconclusive: low OCR confidence.");
     }
     els.verifySection.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (err) {
-    status(`Verification failed: ${err instanceof Error ? err.message : String(err)}`);
+    status(`Red-team check failed: ${err instanceof Error ? err.message : String(err)}`);
   } finally {
     hideSpinner();
   }
+}
+
+function esc(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** Mask recovered text in the hit list: every non-space char becomes a bullet. */
+function maskText(t: string): string {
+  return t.replace(/\S/g, "•");
+}
+
+/**
+ * One-click fix: burn opaque boxes over every flagged region, then run the
+ * whole red-team attack pass again on the FIXED pixels — the new audit carries
+ * fix provenance back to the flagged file's hash.
+ */
+async function fixVerifyFindings() {
+  if (vstate.hits.length === 0 || !vstate.report || !vstate.imageSha) return;
+  const img = els.verifyImg;
+  const w = vstate.imageWidth;
+  const h = vstate.imageHeight;
+  showSpinner("Burning opaque boxes over flagged regions…");
+  try {
+    // snapshot the flagged pixels for the before/after compare
+    const before = document.createElement("canvas");
+    before.width = w;
+    before.height = h;
+    before.getContext("2d")?.drawImage(img, 0, 0);
+    els.fixBefore.src = before.toDataURL("image/png");
+
+    const boxes = vstate.hits.map((x) => padHitBbox(x.bbox, w, h));
+    const canvas = burnRedactions(img, w, h, boxes);
+    els.fixAfter.src = canvas.toDataURL("image/png");
+    const blob = await canvasToPngBlob(canvas);
+    vstate.fixedPng = new Uint8Array(await blob.arrayBuffer());
+
+    vstate.priorFix = {
+      fromSha256: vstate.imageSha,
+      boxesBurned: boxes.length,
+    };
+    els.verifyFixPanel.hidden = false;
+    status("Opaque boxes burned. Re-attacking the fixed pixels…");
+    await loadVerifyImage(blob);
+  } catch (err) {
+    status(`Fix failed: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    hideSpinner();
+  }
+}
+
+function downloadFixedPng() {
+  if (!vstate.fixedPng) return;
+  download(
+    new Blob([vstate.fixedPng], { type: "image/png" }),
+    `redactproof-fixed-${vstate.imageSha?.slice(0, 8) ?? "image"}.png`,
+  );
 }
 
 function renderVerifyHits() {
@@ -664,7 +774,7 @@ function renderVerifyHits() {
   for (const h of vstate.hits) {
     const div = document.createElement("div");
     div.className = "hit";
-    div.title = `${CATEGORY_LABEL[h.category]} (${h.rule}) — via ${h.passes.join(", ")}`;
+    div.title = `${CATEGORY_LABEL[h.category]} (${h.rule}) — via ${h.attackIds.join(", ")}`;
     div.style.left = `${h.bbox.x0 * scale}px`;
     div.style.top = `${h.bbox.y0 * scale}px`;
     div.style.width = `${(h.bbox.x1 - h.bbox.x0) * scale}px`;
@@ -694,12 +804,32 @@ function renderVerifyList() {
     rule.className = "rule";
     rule.textContent = h.rule;
     meta.append(cat, rule);
-    for (const p of h.passes) {
+    for (const p of h.attackIds) {
       const chip = document.createElement("span");
       chip.className = "hit-pass";
       chip.textContent = p;
       rule.appendChild(document.createTextNode(" "));
       rule.appendChild(chip);
+    }
+    // recovered text is masked by default; click to reveal (never persisted)
+    if (h.text) {
+      const row = document.createElement("div");
+      row.className = "masked-text";
+      const idx = vstate.hits.indexOf(h);
+      const shown = vstate.revealed.has(idx);
+      row.classList.toggle("revealed", shown);
+      row.textContent = shown ? h.text : maskText(h.text);
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "reveal-btn";
+      toggle.textContent = shown ? "hide" : "reveal";
+      toggle.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (vstate.revealed.has(idx)) vstate.revealed.delete(idx);
+        else vstate.revealed.add(idx);
+        renderVerifyList();
+      });
+      meta.append(row, toggle);
     }
 
     const conf = document.createElement("span");
@@ -732,8 +862,15 @@ function resetVerify() {
   vstate.imageHeight = 0;
   vstate.hits = [];
   vstate.report = null;
+  vstate.run = null;
+  vstate.fixedPng = null;
+  vstate.priorFix = null;
+  vstate.revealed.clear();
   els.verifySection.hidden = true;
   els.verifyBannerEl.hidden = true;
+  els.verifyGradeEl.hidden = true;
+  els.verifyFixPanel.hidden = true;
+  els.verifyFixBtn.hidden = true;
   els.verifyReportCard.hidden = true;
   els.verifyHitsLayer.innerHTML = "";
   els.verifyFileInput.value = "";
@@ -794,6 +931,8 @@ els.verifyJsonBtn.addEventListener("click", () => {
 });
 els.verifyPrintBtn.addEventListener("click", () => window.print());
 els.verifyResetBtn.addEventListener("click", resetVerify);
+els.verifyFixBtn.addEventListener("click", () => void fixVerifyFindings());
+els.fixDownloadBtn.addEventListener("click", downloadFixedPng);
 
 new ResizeObserver(() => renderVerifyHits()).observe(els.verifyStage);
 

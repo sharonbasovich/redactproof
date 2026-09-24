@@ -10,10 +10,10 @@ pixels into a fresh canvas and then re-runs its own OCR + detectors on the
 export, so residual matches within its supported patterns can surface before
 you share the image.
 
-It also works as a **last-mile check for images redacted anywhere else**: the
-independent *Verify an existing image* path audits the actual file you're
+It also works as a **last-mile red-team check for images redacted anywhere
+else**: the *Red-team an existing image* path attacks the actual file you're
 about to share — not the editing session — so a white-out highlight that only
-*looks* opaque still gets caught.
+*looks* opaque still gets caught, and a one-click opaque burn fixes it.
 
 Built for the **InfinityX Global Hackathon 2K26**.
 
@@ -36,22 +36,32 @@ Built for the **InfinityX Global Hackathon 2K26**.
    category, app version, and timestamp — detected strings and the input
    filename are omitted by design.
 
-### Path B — verify an existing image
+### Path B — red-team an existing image
 
 Already redacted a screenshot in another tool (Preview, Photos, a markup
-extension)? Drop the **final file** on the verifier:
+extension)? Drop the **final file** and let the attack engine try to break
+its cover-up:
 
-1. The uploaded bytes are hashed (SHA-256) and OCR'd locally — the filename
-   itself is never read into the report.
-2. The same 8 detector rules scan the real pixels; residual hits are
-   outlined on the image with category, rule and confidence.
-3. An optional **deeper scan** re-OCRs a contrast-stretched, 2×-upscaled
-   copy to catch faint or low-contrast text; hits are deduplicated across
-   passes and each hit records which pass(es) found it.
-4. The audit JSON is narrowly worded: image SHA-256, dimensions, hit counts
-   and locations, passes run, OCR quality, detector scope and limitations.
-   Statuses are `hits-found`, `no-hits`, or `inconclusive` (when OCR
-   confidence is too low to trust a clean result) — never "PII-free".
+1. The uploaded bytes are hashed (SHA-256) and rasterized; attack variants
+   (`identity`, contrast/upscale transforms — the mock stands in until
+   `src/redteam/` lands) each get an OCR pass, locally.
+2. Hits are deduplicated across variants and carry attack provenance — which
+   variant(s) recovered the region. Recovered text is shown **masked by
+   default** with a click-to-reveal; it never enters the audit.
+3. An honest heuristic grade is computed: **F** (patterns recovered under
+   cover-up), **C** (inconclusive — OCR too weak to trust the absence), or
+   **B** (not flagged by *these* checks). There is deliberately no A: "not
+   flagged" is never "safe".
+4. **Fix it** — one click burns padded opaque boxes over every flagged
+   region, then re-attacks the *fixed* pixels end-to-end. The new audit
+   carries fix provenance back to the flagged file's hash.
+5. The audit JSON is narrowly worded: image SHA-256, dimensions, grade,
+   engine id, variants run, hit counts/locations, OCR quality, detector
+   scope and limitations. Statuses are `hits-found`, `no-hits`, or
+   `inconclusive` — never "PII-free".
+
+Images over 24MP are refused up front; 2× attack variants are skipped above
+6MP to keep the tab responsive (the audit says so when that happens).
 
 ## Honest limitations — read this before trusting it
 
@@ -95,17 +105,23 @@ src/
   ocr.ts      tesseract.js wrapper; shared worker; vendored WASM/lang assets
   redact.ts   burnRedactions() (fresh canvas, opaque fill) + SHA-256 helpers
   report.ts   minimal-content audit report builder (JSON + printable HTML)
-  verify.ts   independent-verifier report builder + cross-pass hit dedupe
-  preprocess.ts  pure RGBA ops (contrast stretch, 2x upscale) for the deep
-              OCR pass — shared by the browser canvas path and pngjs tests
+  verify.ts   independent-verifier report builder + cross-attack hit dedupe,
+              hit-bbox padding for the opaque fix
+  redteam-mock.ts  TEMPORARY stand-in for the red-team engine contract
+              (Raster/AttackId/runAttacks/grade — see src/redteam/ once the
+              engine branch lands; imports repoint unchanged)
+  preprocess.ts  pure RGBA ops (contrast stretch, 2x upscale) for attack
+              variants — shared by the browser canvas path and pngjs tests
   main.ts     UI orchestration: upload, review overlay, manual boxes, export,
-              verification pass, verify path, report rendering
+              verification pass, red-team path (grade/masked hits/fix loop),
+              report rendering
 tests/
   detect.test.ts  28 unit tests: Luhn, per-category rules, overlap/union logic
   e2e.test.ts     pixel-level pipeline: fixture PNG -> OCR -> detect -> burn
                   -> re-OCR -> assert zero residual hits + report contract
-  verify.test.ts  leaky-fixture detection (standard + deep pass), dedupe,
-                  status logic, stable SHA-256, report string/filename hygiene
+  verify.test.ts  leaky-fixture detection, dedupe, status logic, stable
+                  SHA-256, report string/filename hygiene, bbox padding,
+                  fix provenance, mock-engine contract (runAttacks/grade)
 scripts/
   make_fixtures.py  generates the synthetic demo/fixture screenshot (PIL)
   vendor.sh         copies tesseract assets into public/

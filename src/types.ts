@@ -49,8 +49,13 @@ export interface VerificationHit {
 
 /** A hit found while independently verifying an already-exported image. */
 export interface VerifyHit extends VerificationHit {
-  /** Names of the OCR passes that produced this hit, e.g. ["standard", "enhanced-2x"]. */
-  passes: string[];
+  /** Attack/scan variants that produced this hit, e.g. ["identity", "upscale-sharpen"]. */
+  attackIds: string[];
+  /**
+   * Recovered text, shown MASKED in the UI with a reveal toggle. Transient
+   * only — it is never written to the audit report or any download.
+   */
+  text?: string;
 }
 
 export type VerifyStatus = "hits-found" | "no-hits" | "inconclusive";
@@ -73,7 +78,11 @@ export interface VerifyReport {
   };
   check: {
     status: VerifyStatus;
-    passesRun: string[];
+    /** Engine/attack engine id that produced these results. */
+    engine: string;
+    /** Attack/scan variants that ran (identity plus any red-team variants). */
+    attacksRun: string[];
+    grade: { letter: "A" | "B" | "C" | "F"; reasons: string[] };
     ocrWords: number;
     ocrMeanConfidence: number;
     lowOcrConfidence: boolean;
@@ -83,8 +92,18 @@ export interface VerifyReport {
       rule: string;
       confidence: number;
       bbox: BBox;
-      passes: string[];
+      attackIds: string[];
     }>;
+  };
+  /**
+   * Set when this report describes a re-check of a file the user just fixed
+   * in-app: provenance chain from the flagged image to the burned export.
+   */
+  fix?: {
+    fromSha256: string;
+    boxesBurned: number;
+    priorStatus: VerifyStatus;
+    priorHits: number;
   };
   detectorScope: string[];
   limitations: string;

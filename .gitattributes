@@ -1,0 +1,2 @@
+# Shell scripts must keep LF even on CRLF checkouts (Windows) or they won't run.
+*.sh text eol=lf
