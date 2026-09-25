@@ -1,29 +1,61 @@
-# RedactProof — 2-minute demo storyboard
+# RedactProof Red Team — demo storyboard (≤2:30)
 
-Target runtime ~2:00. One continuous take is fine; cuts marked **[CUT]** are
-optional trims if running long. Narration is a guide, not a script.
+Target runtime ~2:20. One continuous take; cuts marked **[CUT]** are optional
+trims. Narration is a guide, not a script. The centerpiece is the **red-team
+attack → grade → one-click fix → re-attack** loop on a file that *looks*
+redacted.
 
 | # | Shot | Screen | Narration beat | ~Time |
 |---|------|--------|----------------|-------|
-| 1 | Cold open on landing page | Dropzone + "100% local" pill | "Screenshots leak PII all the time — and most people redact them wrong: translucent highlights, editable annotation layers, or a field they just missed." | 0:00–0:15 |
-| 2 | Click **Try the synthetic demo screenshot** | OCR spinner with % progress | "Everything runs in the browser — nothing is uploaded. Local OCR scans the image…" | 0:15–0:30 |
-| 3 | Review screen appears | ~10 labeled boxes over emails, cards, SSN, IP, token + sidebar list | "…and flags emails, phone numbers, payment cards — validated with the Luhn check, not just a regex — postal codes, SSNs, IPs, tokens." | 0:30–0:50 |
-| 4 | Interaction quickies | Toggle one box off, delete one, **drag a manual box** over the token (or any missed spot) | "Every box is editable — and you can cover anything the detector missed." | 0:50–1:05 |
-| 5 | Click **Redact & export PNG** | Before/after side-by-side, opaque black boxes | "Export burns opaque pixels into a fresh canvas — no reversible overlay, no source metadata." **[CUT]** | 1:05–1:15 |
-| 6 | Verification banner | "N residual hits" warn state *or* clean state | "Then the twist: it re-scans its own export. Anything left over gets caught here — that's what makes it Redact**Proof**." | 1:15–1:35 |
-| 7 | Audit report card + downloads | SHA-256, per-category counts, JSON/print buttons | "And you get a content-free audit report — SHA-256 of the export, counts, timestamp — proof the check happened, with no PII inside." | 1:35–1:50 |
-| 8 | Close | Footer disclaimer on screen | "It's honest about its limits too: a clean scan isn't a guarantee — OCR can miss handwriting and blurry text. Always eyeball the export." | 1:50–2:00 |
+| 1 | Cold open on landing | Two paths side by side + "100% local" pill | "Most redaction tools trust the editor. RedactProof attacks the pixels — whether it redacted the image, or some other tool did." | 0:00–0:15 |
+| 2 | Click **Try the marker-covered demo** (red-team path) | Attack spinner cycling variants (`identity → levels-stretch → …`) | "This screenshot was 'redacted' somewhere else — a black marker box at 55% opacity. Looks covered. Everything runs locally; nothing uploads." | 0:15–0:35 |
+| 3 | **Attack results appear** | Grade **C** panel + warn banner + outlined recovered regions | "Plain OCR sees nothing — that's the trap. But the attack pass stretches the marker's levels and reads right through it: five-plus sensitive patterns, recoverable. That's what you just almost shared." | 0:35–1:00 |
+| 4 | Hit list, masked text | Category/rule/confidence + attack chips (`levels-stretch`), bullets for text, reveal toggle | "Every hit names the attack that broke it. The recovered text stays masked — you can reveal it to confirm, and it never lands in the audit." **[CUT]** | 1:00–1:10 |
+| 5 | Audit card | SHA-256, grade C, engine + variants, metadata row, limitations | "The audit is deliberately narrow: the file's hash, the grade, which attacks ran, where the hits are — detected strings and even the filename are never written into it." | 1:10–1:25 |
+| 6 | Click **Fix it — burn opaque boxes & re-check** | Spinner, then grade **A**, fix panel before/after | "One click burns *opaque* boxes over every recovered region and re-attacks the fixed pixels — nothing survives, nothing to peel off." | 1:25–1:55 |
+| 7 | New audit + download | "Fix provenance" row chaining the flagged hash | "And the re-check chains back to the flagged file's hash, so the audit tells the whole story." **[CUT]** | 1:55–2:05 |
+| 8 | Close | Footer disclaimer / honest-limitations | "An A means *these* attacks recovered nothing — not 'safe'. Names, addresses, handwriting, QR codes aren't covered — mask those yourself. Redact it. Then prove you checked." | 2:05–2:20 |
 
 ## Demo choreography notes
 
-- The strongest single beat is shot 6 in the **warn state**: leave one email
-  disabled before exporting so the banner shows "1 residual hit" — it proves the
-  verification pass genuinely works, then point out you can just widen a box and
-  re-export.
+- Shot 3 is the money shot: the baseline (`identity`) pass reads nothing, the
+  enhancement variants recover the covered patterns — that gap is the whole
+  point. Linger on a recovered region before the grade reads out.
+- The hero fixture is `fixtures/redteam/marker-55.png` (served as
+  `public/demo-redteam.png`): a synthetic support screenshot under a 55% black
+  marker. Measured behavior in `tests/redteam.test.ts`: identity recovers
+  nothing; `levels-stretch` recovers 5+ categories incl. payment card → grade
+  **C**. Opaque-burned export → grade **A**.
+- Honest grade vocabulary on screen: F = readable as-is, C = recoverable only
+  after enhancement, B = marginal weak recovery, A = nothing recovered *by
+  these tests*. Never say "safe".
 - If network conditions matter, open DevTools first: every request is
   same-origin (`/vendor`, `/lang`) — a good visual for the "no third-party
   runtime" claim.
-- All demo data is synthetic: test PANs, the Woolworth SSN, a 555 number,
-  TEST-NET-3 IP, example.com emails.
-- Recording asset (golden-path run): see `docs/` or the session attachments —
-  `rec-*.mp4` covers shots 1–8 except the warn-state variant.
+- Wording that keeps us honest: say "omits detected strings and the filename",
+  never "contains no personal information"; say "a check ran", never "proof
+  the image is clean".
+- Screenshots of this flow live in `docs/screenshots/`.
+
+## Demo candidate
+
+`docs/demo-redteam-final.mp4` — recorded run on the merged-engine build:
+marker demo → grade C ("recovery by the tested attacks only, never a safety
+certification") → masked recovered text → Fix → re-attack → grade A with
+"no tested attack recovered a supported pattern — residual uncertainty" +
+the metadata-leak demo → strip → re-check clean. This is the ≤2:30 demo cut.
+SHA-256: `7ba538138105a8dad43890255429045c42a03a3f6c0e92c95f59327a525dda0b`
+
+`docs/demo-two-path-126s.mp4` — 126s raw take of the **pre-red-team** two-path
+flow. Superseded by the recording above; kept for comparison only.
+SHA-256: `e07db30b42a92ef4c4a5e02c4a067d53a986a8572835d4b2fa42e8b09ffd2e92`
+
+## Reference hashes (this build)
+
+- `public/demo-redteam.png` (copied from `fixtures/redteam/marker-55.png`)
+  SHA-256: `e9421db4b73eea7a4d48982d9308247fe179db219671595af725e4a913973520`
+  (the audit hashes the uploaded bytes verbatim — same as `sha256sum`).
+- Redact-path export PNG SHA-256 from the golden-path run:
+  `8e75b14e258e0641f4bf2fdc59b8bdabe4357e9fc312a28ab672ca590f84eea4`
+  (PNG re-encode is deterministic in this build, but treat export hashes as
+  run-specific, not fixture constants).

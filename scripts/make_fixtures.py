@@ -71,6 +71,61 @@ def build() -> Image.Image:
     return img
 
 
+def build_leaky() -> Image.Image:
+    """A screenshot someone 'redacted' in another tool — badly.
+
+    The card and SSN are covered by solid boxes (opaque, unreadable).
+    The email is covered by a translucent white-out highlight at ~55%
+    opacity — it *looks* masked but the characters survive, which is the
+    exact failure mode the independent verifier exists to catch. A phone
+    number in the sign-off was missed entirely. All values synthetic.
+    """
+    W, H = 1100, 640
+    img = Image.new("RGB", (W, H), "#f7f8fa")
+    d = ImageDraw.Draw(img, "RGBA")
+    f_head = font(26)
+    f = font(20)
+    f_small = font(17)
+
+    d.rectangle([0, 0, W, 56], fill="#1f2733")
+    d.text((24, 14), "Acme Support Console", font=f_head, fill="#e8edf2")
+
+    d.rectangle([24, 76, 1076, 590], outline="#c9d2dc", width=2, fill="#ffffff")
+    d.text((48, 96), "Ticket #4821 — Billing dispute (redacted copy)", font=f_head, fill="#1a2430")
+
+    y = 160
+    d.text((48, y), "Customer: Jane Q. Public (SYNTHETIC)", font=f, fill="#22303d")
+    y += 44
+
+    # email "masked" with a translucent white-out box — still OCR-legible
+    d.text((48, y), "Email: jane.public@example.com", font=f, fill="#22303d")
+    d.rectangle([140, y - 6, 560, y + 34], fill=(255, 255, 255, 100))
+    y += 44
+
+    # card properly covered by an opaque black box
+    d.text((48, y), "Card:  ", font=f, fill="#22303d")
+    d.rectangle([118, y - 4, 560, y + 30], fill="#000000")
+    y += 44
+
+    # SSN properly covered
+    d.text((48, y), "Gov ID: ", font=f, fill="#22303d")
+    d.rectangle([140, y - 4, 340, y + 30], fill="#000000")
+    y += 60
+
+    # sign-off — the phone number was simply missed by whoever redacted
+    d.text((48, y), "Reach me at (416) 555-0142 if anything bounced.", font=f, fill="#22303d")
+    y += 38
+    d.text((48, y), "— support agent #12", font=f_small, fill="#33404d")
+    y += 52
+    d.text(
+        (48, y),
+        "Redacted with MarkupTool 3.1 — reviewed before export",
+        font=f_small,
+        fill="#6b7683",
+    )
+    return img
+
+
 def main() -> None:
     img = build()
     for out in (
@@ -78,6 +133,13 @@ def main() -> None:
         os.path.join(ROOT, "public", "demo.png"),
     ):
         img.save(out, "PNG")
+        print("wrote", out)
+    leaky = build_leaky()
+    for out in (
+        os.path.join(ROOT, "fixtures", "leaky-redaction.png"),
+        os.path.join(ROOT, "public", "demo-leaky.png"),
+    ):
+        leaky.save(out, "PNG")
         print("wrote", out)
 
 

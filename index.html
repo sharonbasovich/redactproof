@@ -7,7 +7,7 @@
     <title>RedactProof — redact, verify, prove</title>
     <meta
       name="description"
-      content="Local-first screenshot redaction with post-export verification. All processing happens in your browser."
+      content="Local-first screenshot redaction with post-export verification, plus an independent checker for images redacted anywhere else. All processing happens in your browser."
     />
   </head>
   <body>
@@ -37,24 +37,117 @@
         </ol>
 
         <section id="upload-section" class="card">
-          <div
-            id="dropzone"
-            class="dropzone"
-            role="button"
-            tabindex="0"
-            aria-label="Upload a screenshot to redact"
-          >
-            <svg viewBox="0 0 24 24" class="drop-icon" aria-hidden="true">
-              <path d="M12 16V4m0 0l-4 4m4-4l4 4" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>
-            </svg>
-            <p><strong>Drop a PNG or JPG</strong> here, or click to choose</p>
-            <p class="muted">Nothing is uploaded — the file is read by your browser only.</p>
-            <input id="file-input" type="file" accept="image/png,image/jpeg" hidden />
+          <div class="path-grid">
+            <div class="path-card">
+              <h2>Redact a screenshot</h2>
+              <p class="muted">Find PII, burn it out, then re-scan the export.</p>
+              <div
+                id="dropzone"
+                class="dropzone"
+                role="button"
+                tabindex="0"
+                aria-label="Upload a screenshot to redact"
+              >
+                <svg viewBox="0 0 24 24" class="drop-icon" aria-hidden="true">
+                  <path d="M12 16V4m0 0l-4 4m4-4l4 4" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>
+                </svg>
+                <p><strong>Drop a PNG or JPG</strong> here, or click to choose</p>
+                <p class="muted">Nothing is uploaded — the file is read by your browser only.</p>
+                <input id="file-input" type="file" accept="image/png,image/jpeg" hidden />
+              </div>
+              <div class="demo-row">
+                <button id="demo-btn" class="btn ghost" type="button">Try the synthetic demo screenshot</button>
+                <span class="muted">demo data is 100% fake</span>
+              </div>
+            </div>
+
+            <div class="path-card">
+              <h2>Red-team an existing image</h2>
+              <p class="muted">
+                Redacted it in another tool? Attack the <em>actual file</em> and see what still leaks.
+              </p>
+              <div
+                id="verify-dropzone"
+                class="dropzone"
+                role="button"
+                tabindex="0"
+                aria-label="Upload an image to verify"
+              >
+                <svg viewBox="0 0 24 24" class="drop-icon" aria-hidden="true">
+                  <path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <p><strong>Drop a PNG or JPG</strong> to audit its pixels</p>
+                <p class="muted">Local OCR + detectors on the file as-is. The filename is never recorded.</p>
+                <input id="verify-file-input" type="file" accept="image/png,image/jpeg" hidden />
+              </div>
+              <label class="deep-scan">
+                <input id="deep-scan" type="checkbox" checked />
+                <span>All 7 attack variants (slower) — contrast, gamma, invert, channel-max and 2&times; upscale transforms that can read text under translucent covers</span>
+              </label>
+              <div class="demo-row">
+                <button id="verify-demo-btn" class="btn ghost" type="button">Try the marker-covered demo</button>
+                <span class="muted">looks covered — isn&rsquo;t</span>
+              </div>
+              <div class="demo-row">
+                <button id="verify-meta-demo-btn" class="btn ghost" type="button">Try the metadata-leak demo</button>
+                <span class="muted">pixels clean — container isn&rsquo;t</span>
+              </div>
+            </div>
           </div>
-          <div class="demo-row">
-            <button id="demo-btn" class="btn ghost" type="button">Try the synthetic demo screenshot</button>
-            <span class="muted">demo data is 100% fake</span>
+        </section>
+
+        <section id="verify-section" class="card" hidden>
+          <div class="card-head">
+            <h2>Red-team audit &mdash; the file you uploaded</h2>
+            <div class="card-actions">
+              <button id="verify-fix-btn" class="btn primary" type="button" hidden>Fix it — burn opaque boxes &amp; re-check</button>
+              <button id="verify-strip-btn" class="btn" type="button" hidden>Strip metadata &amp; re-check</button>
+              <button id="verify-json-btn" class="btn" type="button">Download audit JSON</button>
+              <button id="verify-print-btn" class="btn" type="button">Print report</button>
+              <button id="verify-reset-btn" class="btn ghost" type="button">Start over</button>
+            </div>
+          </div>
+          <div id="verify-result-banner" class="verify-banner" hidden></div>
+          <div id="verify-grade" class="grade-panel" hidden></div>
+          <div id="verify-fix-panel" class="fix-panel" hidden>
+            <h3>Opaque fix applied &mdash; re-checking the fixed pixels</h3>
+            <div class="compare fix-compare">
+              <figure>
+                <figcaption>Flagged file</figcaption>
+                <img id="fix-before" alt="Uploaded image before the opaque fix" />
+              </figure>
+              <figure>
+                <figcaption>Burned export</figcaption>
+                <img id="fix-after" alt="Same image with opaque boxes burned over flagged regions" />
+              </figure>
+            </div>
+            <div class="card-actions">
+              <button id="fix-download-btn" class="btn" type="button">Download fixed PNG</button>
+            </div>
+            <p class="muted">Opaque burn replaces the pixels outright — nothing underneath survives or can be peeled off.</p>
+          </div>
+          <div class="work-area">
+            <div class="stage-wrap">
+              <div id="verify-stage" class="stage" aria-label="Uploaded image with residual detections outlined">
+                <img id="verify-img" alt="Uploaded image being verified" />
+                <div id="verify-hits-layer"></div>
+              </div>
+            </div>
+            <aside class="panel" aria-label="Residual detections">
+              <h3>Residual detections <span id="verify-count" class="count-chip">0</span></h3>
+              <ul id="verify-hit-list" class="det-list"></ul>
+              <p id="verify-empty" class="muted" hidden>No detector hits in the uploaded image.</p>
+              <p class="scope">
+                Detectors do <em>not</em> cover names, street addresses, DOBs,
+                account/SIN/IBAN numbers, OTPs, handwriting, or QR/barcodes —
+                mask those manually before sharing.
+              </p>
+            </aside>
+          </div>
+          <div id="verify-report" class="report-card" hidden>
+            <h3>Verification audit</h3>
+            <div id="verify-report-body"></div>
           </div>
         </section>
 
@@ -68,7 +161,8 @@
           </div>
           <p class="hint">
             Click a box to select it (Delete removes, D toggles). Drag on empty image to add a
-            manual box. Uncheck items in the list to keep them.
+            manual box — use it for anything the detectors can't see: names, street addresses,
+            faces, account numbers. Uncheck items in the list to keep them.
           </p>
           <p class="scope">
             <strong>Detector scope:</strong> emails, North-American phones, payment cards (Luhn),

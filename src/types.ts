@@ -47,12 +47,93 @@ export interface VerificationHit {
   bbox: BBox;
 }
 
+/** A hit found while independently verifying an already-exported image. */
+export interface VerifyHit extends VerificationHit {
+  /** Attack/scan variants that produced this hit, e.g. ["identity", "upscale-sharpen"]. */
+  attackIds: string[];
+  /**
+   * Recovered text, shown MASKED in the UI with a reveal toggle. Transient
+   * only — it is never written to the audit report or any download.
+   */
+  text?: string;
+}
+
+export type VerifyStatus = "hits-found" | "no-hits" | "inconclusive";
+
+/**
+ * Audit for the standalone "verify an existing image" path. Deliberately
+ * narrower than AuditReport: no redaction section (nothing was redacted
+ * here), no filename, no detected strings — just what was checked and
+ * how much trust to put in it.
+ */
+export interface VerifyReport {
+  tool: "RedactProof";
+  toolVersion: string;
+  reportKind: "independent-image-verify";
+  generatedAt: string; // ISO 8601
+  image: {
+    sha256: string;
+    pixelWidth: number;
+    pixelHeight: number;
+  };
+  check: {
+    status: VerifyStatus;
+    /** Engine/attack engine id that produced these results. */
+    engine: string;
+    /** Attack/scan variants that ran (identity plus any red-team variants). */
+    attacksRun: string[];
+    grade: { letter: "A" | "B" | "C" | "F"; reasons: string[] };
+    ocrWords: number;
+    ocrMeanConfidence: number;
+    lowOcrConfidence: boolean;
+    residualHits: number;
+    hits: Array<{
+      category: string;
+      rule: string;
+      confidence: number;
+      bbox: BBox;
+      attackIds: string[];
+    }>;
+    /**
+     * Container-level metadata found in the uploaded file itself
+     * (independent of the pixel attack pass). Chunk names only — no values.
+     */
+    metadata?: {
+      hasExif: boolean;
+      hasGps: boolean;
+      hasXmp: boolean;
+      pngTextChunks: string[];
+      bytesStripped: number | null;
+    };
+  };
+  /**
+   * Set when this report describes a re-check of a file the user just
+   * metadata-stripped in-app: provenance back to the file that carried the
+   * metadata. `removed` lists metadata kinds/chunk names only — no values.
+   */
+  metadataStrip?: {
+    fromSha256: string;
+    removed: string[];
+  };
+  /**
+   * Set when this report describes a re-check of a file the user just fixed
+   * in-app: provenance chain from the flagged image to the burned export.
+   */
+  fix?: {
+    fromSha256: string;
+    boxesBurned: number;
+    priorStatus: VerifyStatus;
+    priorHits: number;
+  };
+  detectorScope: string[];
+  limitations: string;
+}
+
 export interface AuditReport {
   tool: "RedactProof";
   toolVersion: string;
   generatedAt: string; // ISO 8601
   input: {
-    fileName: string;
     pixelWidth: number;
     pixelHeight: number;
   };

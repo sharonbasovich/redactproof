@@ -13,7 +13,6 @@ export const DISCLAIMER =
   "visually before sharing it.";
 
 export function buildAuditReport(args: {
-  inputFileName: string;
   inputWidth: number;
   inputHeight: number;
   outputSha256: string;
@@ -35,7 +34,6 @@ export function buildAuditReport(args: {
     toolVersion: APP_VERSION,
     generatedAt: (args.now ?? new Date()).toISOString(),
     input: {
-      fileName: args.inputFileName,
       pixelWidth: args.inputWidth,
       pixelHeight: args.inputHeight,
     },
@@ -58,7 +56,7 @@ export function buildAuditReport(args: {
   };
 }
 
-/** Content-free by contract: report must never contain detected text. */
+/** Omits detected text and input filenames by contract — counts and hashes only. */
 export function reportToJson(report: AuditReport): string {
   return JSON.stringify(report, null, 2);
 }
@@ -73,7 +71,7 @@ export function reportSummaryHtml(report: AuditReport): string {
   return `
     <dl class="report-dl">
       <dt>Generated</dt><dd>${esc(report.generatedAt)}</dd>
-      <dt>Input</dt><dd>${esc(report.input.fileName)} (${report.input.pixelWidth}×${report.input.pixelHeight})</dd>
+      <dt>Input</dt><dd>${report.input.pixelWidth}×${report.input.pixelHeight}px (filename omitted)</dd>
       <dt>Output SHA-256</dt><dd class="mono">${esc(report.output.sha256)}</dd>
       <dt>Redaction boxes</dt><dd>${report.redaction.totalBoxes} (${report.redaction.manualBoxes} manual)</dd>
       <dt>Residual detector hits</dt><dd>${report.verification.residualHits}</dd>
