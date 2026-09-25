@@ -1,6 +1,7 @@
 import { detectSensitive } from "../detect";
 import { recognize } from "../ocr";
 import type { BBox } from "../types";
+import { findCandidateRegions } from "./analyze";
 import { rasterToOcrInput } from "./canvas";
 import type {
   AttackHit,
@@ -273,6 +274,56 @@ function upscaleSharpen(src: Raster, mask: RegionMask | null): Raster {
 }
 
 /**
+ * Per-region raw-luminance stretch over TIGHT (unpadded) boxes.
+ *
+ * Unlike `levelsStretch`, each region gets its own histogram: a
+ * near-opaque marker band crushes the underlying signal into a handful
+ * of luma levels (e.g. text ~10 vs band ~17 at 97% opacity), and a
+ * global or blur-divided transform leaves that residual invisible to
+ * OCR. Stretching each region's own [p1, p99] range to full scale
+ * amplifies exactly the levels the marker failed to kill.
+ *
+ * Padding is deliberately absent: the measured effect depends on the
+ * histogram being dominated by the band itself — even a modest context
+ * margin reintroduces enough clean background to re-flatten the
+ * residual. Boxes are used exactly as discovered/supplied.
+ */
+function regionStretch(src: Raster, boxes: BBox[]): Raster {
+  const out = cloneRaster(src);
+  for (const b of boxes) {
+    const x0 = Math.max(0, Math.floor(Math.min(b.x0, b.x1)));
+    const y0 = Math.max(0, Math.floor(Math.min(b.y0, b.y1)));
+    const x1 = Math.min(src.width, Math.ceil(Math.max(b.x0, b.x1)));
+    const y1 = Math.min(src.height, Math.ceil(Math.max(b.y0, b.y1)));
+    if (x1 - x0 < 2 || y1 - y0 < 2) continue;
+
+    const hist = new Uint32Array(256);
+    let count = 0;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        hist[Math.round(luma(src.data, (src.width * y + x) * 4))]++;
+        count++;
+      }
+    }
+    const lo = percentile(hist, count, 0.01);
+    const hi = percentile(hist, count, 0.99);
+    const range = Math.max(1, hi - lo);
+    const lut = new Uint8ClampedArray(256);
+    for (let v = 0; v < 256; v++) lut[v] = ((v - lo) / range) * 255;
+
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const o = (src.width * y + x) * 4;
+        const v = lut[Math.round(luma(src.data, o))];
+        out.data[o] = out.data[o + 1] = out.data[o + 2] = v;
+        out.data[o + 3] = 255;
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Apply one attack transform. With `regions`, pixels inside each padded
  * region are transformed and everything else is copied through, so the
  * output keeps the exported image's surrounding context.
@@ -294,6 +345,18 @@ export function applyAttack(src: Raster, id: AttackId, regions?: BBox[]): Raster
       return channelMax(src, mask);
     case "upscale-sharpen":
       return upscaleSharpen(src, mask);
+    case "region-stretch": {
+      // Localized recovery: tight boxes that look like redaction
+      // attempts — caller-supplied or auto-discovered — each stretched
+      // on its own histogram. Measured: recovers supported patterns a
+      // ~97-99% marker still leaks, where every global transform reads
+      // nothing. With nothing suspicious found it degrades to the
+      // full-image stretch rather than doing nothing.
+      const scope =
+        regions && regions.length ? regions : findCandidateRegions(src);
+      if (!scope.length) return levelsStretch(src, mask);
+      return regionStretch(src, scope);
+    }
   }
 }
 

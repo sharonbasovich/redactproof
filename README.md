@@ -13,7 +13,9 @@ you share the image.
 It also works as a **last-mile red-team check for images redacted anywhere
 else**: the *Red-team an existing image* path attacks the actual file you're
 about to share — not the editing session — so a white-out highlight that only
-*looks* opaque still gets caught, and a one-click opaque burn fixes it.
+*looks* nearly opaque can still leak. RedactProof exposes supported patterns
+that remain recoverable and lets you burn the flagged regions, then re-check
+and repeat until no tested attack finds another hit.
 
 Built for the **InfinityX Global Hackathon 2K26**.
 
@@ -43,9 +45,13 @@ extension)? Drop the **final file** and let the attack engine try to break
 its cover-up:
 
 1. The uploaded bytes are hashed (SHA-256), checked for residual container
-   metadata (EXIF/GPS/XMP/PNG text chunks), and rasterized; up to 7 attack
+   metadata (EXIF/GPS/XMP/PNG text chunks), and rasterized; up to 8 attack
    variants (`identity`, `levels-stretch`, `gamma-lift`, `gamma-drop`,
-   `invert`, `channel-max`, `upscale-sharpen`) each get an OCR pass, locally.
+   `invert`, `channel-max`, `upscale-sharpen`, `region-stretch`) each get an
+   OCR pass, locally. `region-stretch` is the localized attack: it finds
+   areas that look like cover-ups (`findCandidateRegions`) and stretches each
+   region's own luminance histogram — a near-opaque marker that defeats
+   every global transform can still leak its residual that way.
 2. Hits are deduplicated across variants and carry attack provenance — which
    variant(s) recovered the region. Recovered text is shown **masked by
    default** with a click-to-reveal; it never enters the audit.
@@ -54,9 +60,13 @@ its cover-up:
    case), **B** (marginal recovery — every enhanced hit is low-confidence),
    **A** (nothing recovered by any attack run). An A still means "not
    flagged by *these* checks", never "safe".
-4. **Fix it** — one click burns padded opaque boxes over every flagged
-   region, then re-attacks the *fixed* pixels end-to-end. The new audit
-   carries fix provenance back to the flagged file's hash.
+4. **Fix it** — burns padded opaque boxes over every flagged region, then
+   re-attacks the *fixed* pixels end-to-end. Repeat until the re-check is
+   clean: on the marker-97 demo `region-stretch` peels a deeper residual on
+   the *second* pass (the first burn changes image statistics, surfacing
+   hits on bands pass 1 missed), so the measured flow is C → C → A over two
+   clicks. The new audit carries fix provenance back to the flagged file's
+   hash.
 5. The audit JSON is narrowly worded: image SHA-256, dimensions, grade,
    engine id, variants run, hit counts/locations, OCR quality, container
    metadata findings, detector scope and limitations. Statuses are
@@ -81,6 +91,9 @@ Images over 24MP are refused up front; 2× attack variants are skipped above
   you what's under a truly opaque box, and it can't promise a clean image is
   safe. Mask names, addresses, photos and anything outside the 8 supported
   patterns manually.
+- **Fix is an iterate-until-clean loop, not one click.** A band that reads
+  "no hit" on one pass can still leak on the next — burn, re-attack, and
+  only trust the last clean pass.
 - PDF input is not supported in this version — convert to PNG first.
 - English-language OCR only (`eng` traineddata).
 
@@ -110,7 +123,7 @@ src/
   verify.ts   independent-verifier report builder + cross-attack hit dedupe,
               hit-bbox padding for the opaque fix
   redteam/    attack engine (merged from codex/redactproof-redteam-*):
-              types.ts (Raster/AttackId/contracts), attack.ts (7 variants,
+              types.ts (Raster/AttackId/contracts), attack.ts (8 variants,
               runAttacks, cross-variant dedupe), grade.ts (A/B/C/F grading),
               canvas.ts (raster <-> canvas/pngjs bridge), analyze.ts
               (redaction-region classification), metadata.ts (EXIF/GPS/XMP/
@@ -155,13 +168,15 @@ the card numbers are published test PANs, the SSN is the historical Woolworth
 specimen, the phone number is a reserved 555 range, the IP is TEST-NET-3, and
 the emails use example.com. No real personal data is used anywhere.
 
-`fixtures/redteam/marker-55.png` / `public/demo-redteam.png` is the red-team
-demo: a screenshot covered by a 55%-opacity black marker — it *looks*
-redacted, plain OCR reads nothing, but the `levels-stretch` attack recovers
-5+ supported categories (measured in `tests/redteam.test.ts`). The expected
-flow is grade **C** → **Fix it** → re-attack grades **A** on the burned
-export. `fixtures/redteam/` also holds `marker-75`, `marker-yellow`,
-`marker-opaque` (the control), `blur`, `pixelate` and `clean`.
+`fixtures/redteam/marker-97.png` / `public/demo-redteam.png` is the red-team
+demo: a screenshot covered by a ~97%-opacity black marker — it looks
+near-opaque, plain OCR and every global attack read nothing, but `region-stretch`
+recovers part of what the marker leaked (phone + SSN in the measured run —
+partial recovery, honestly graded). The measured flow takes two fix passes:
+grade **C** → **Fix it** → **C** (new residual hits) → **Fix it** → **A**.
+`fixtures/redteam/` also holds `marker-55`, `marker-75`, `marker-99`
+(the limit case), `marker-yellow`, `marker-opaque` (the control), `blur`,
+`pixelate` and `clean`.
 
 ## License
 

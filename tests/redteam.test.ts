@@ -22,6 +22,7 @@ import type {
   AttackRunResult,
   Raster,
 } from "../src/redteam/types";
+import { ATTACK_IDS } from "../src/redteam/types";
 
 function pngToRaster(path: string): Raster {
   const png = PNG.sync.read(readFileSync(path));
@@ -215,6 +216,37 @@ describe("fixture recovery (real OCR)", () => {
     // measured: phone, card, ssn, zip recovered; email+ipv4 lost
     expect(cats(r).size).toBeGreaterThanOrEqual(3);
     expect(cats(r).has("ssn")).toBe(true);
+  }, 120_000);
+
+  it("97% marker (looks opaque): region-stretch recovers what globals miss", async () => {
+    const raster = pngToRaster("fixtures/redteam/marker-97.png");
+    // The seven global transforms read nothing at this opacity.
+    const globals = await runAttacks(raster, {
+      variants: [...ATTACK_IDS].filter((a) => a !== "region-stretch"),
+    });
+    expect(globals.hits).toHaveLength(0);
+    // The localized stretch pulls a residual out of the marker band.
+    const r = await runAttacks(raster);
+    const g = grade(r);
+    expect(g.grade).toBe("C");
+    expect(r.hits.some((h) => h.attacks.includes("region-stretch"))).toBe(true);
+    // measured: phone + ssn recovered (partial — email/card/zip/ip stay lost)
+    expect(cats(r).has("ssn")).toBe(true);
+    expect(cats(r).size).toBeGreaterThanOrEqual(2);
+  }, 120_000);
+
+  it("99% marker: region-stretch still peels a partial residual", async () => {
+    const r = await runAttacks(pngToRaster("fixtures/redteam/marker-99.png"));
+    // measured: same partial set as 97% — a limit case, not a guarantee
+    expect(r.hits.some((h) => h.attacks.includes("region-stretch"))).toBe(true);
+    expect(cats(r).size).toBeGreaterThanOrEqual(1);
+  }, 120_000);
+
+  it("region-stretch introduces no false positives on the opaque control", async () => {
+    const r = await runAttacks(pngToRaster("fixtures/redteam/marker-opaque.png"), {
+      variants: ["region-stretch"],
+    });
+    expect(r.hits).toHaveLength(0);
   }, 120_000);
 
   it("opaque marker: nothing recoverable (grade A, the control)", async () => {
