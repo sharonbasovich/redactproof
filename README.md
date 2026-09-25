@@ -58,9 +58,13 @@ its cover-up:
    case), **B** (marginal recovery — every enhanced hit is low-confidence),
    **A** (nothing recovered by any attack run). An A still means "not
    flagged by *these* checks", never "safe".
-4. **Fix it** — one click burns padded opaque boxes over every flagged
-   region, then re-attacks the *fixed* pixels end-to-end. The new audit
-   carries fix provenance back to the flagged file's hash.
+4. **Fix it** — burns padded opaque boxes over every flagged region, then
+   re-attacks the *fixed* pixels end-to-end. Repeat until the re-check is
+   clean: on the marker-97 demo `region-stretch` peels a deeper residual on
+   the *second* pass (the first burn changes image statistics, surfacing
+   hits on bands pass 1 missed), so the measured flow is C → C → A over two
+   clicks. The new audit carries fix provenance back to the flagged file's
+   hash.
 5. The audit JSON is narrowly worded: image SHA-256, dimensions, grade,
    engine id, variants run, hit counts/locations, OCR quality, container
    metadata findings, detector scope and limitations. Statuses are
@@ -85,6 +89,9 @@ Images over 24MP are refused up front; 2× attack variants are skipped above
   you what's under a truly opaque box, and it can't promise a clean image is
   safe. Mask names, addresses, photos and anything outside the 8 supported
   patterns manually.
+- **Fix is an iterate-until-clean loop, not one click.** A band that reads
+  "no hit" on one pass can still leak on the next — burn, re-attack, and
+  only trust the last clean pass.
 - PDF input is not supported in this version — convert to PNG first.
 - English-language OCR only (`eng` traineddata).
 

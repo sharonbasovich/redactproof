@@ -12,7 +12,7 @@ redacted.
 | 3 | **Attack results appear** | Grade **C** panel + warn banner + outlined recovered regions | "Plain OCR sees nothing — every global attack sees nothing. But a localized stretch that zooms into the marker's own pixels peels the residual it left: sensitive patterns, still recoverable. That's what you just almost shared." | 0:35–1:00 |
 | 4 | Hit list, masked text | Category/rule/confidence + attack chips (`levels-stretch`), bullets for text, reveal toggle | "Every hit names the attack that broke it. The recovered text stays masked — you can reveal it to confirm, and it never lands in the audit." **[CUT]** | 1:00–1:10 |
 | 5 | Audit card | SHA-256, grade C, engine + variants, metadata row, limitations | "The audit is deliberately narrow: the file's hash, the grade, which attacks ran, where the hits are — detected strings and even the filename are never written into it." | 1:10–1:25 |
-| 6 | Click **Fix it — burn opaque boxes & re-check** | Spinner, then grade **A**, fix panel before/after | "One click burns *opaque* boxes over every recovered region and re-attacks the fixed pixels — nothing survives, nothing to peel off." | 1:25–1:55 |
+| 6 | Click **Fix it — burn opaque boxes & re-check** (twice) | Spinner → still C (new residual peeled) → second burn → grade **A**, fix panel before/after | "One click burns *opaque* boxes over every recovered region. Watch — the re-attack peels an even deeper residual out of the remaining bands, so we burn again until the last pass reads clean." | 1:25–1:55 |
 | 7 | New audit + download | "Fix provenance" row chaining the flagged hash | "And the re-check chains back to the flagged file's hash, so the audit tells the whole story." **[CUT]** | 1:55–2:05 |
 | 8 | Close | Footer disclaimer / honest-limitations | "An A means *these* attacks recovered nothing — not 'safe'. Names, addresses, handwriting, QR codes aren't covered — mask those yourself. Redact it. Then prove you checked." | 2:05–2:20 |
 
@@ -44,12 +44,16 @@ redacted.
 
 ## Demo candidate
 
-`docs/demo-redteam-final.mp4` — recorded run on the merged-engine build
-(the 55%-marker cut; re-record on marker-97 before submission):
-marker demo → grade C ("recovery by the tested attacks only, never a safety
-certification") → masked recovered text → Fix → re-attack → grade A with
-"no tested attack recovered a supported pattern — residual uncertainty" +
-the metadata-leak demo → strip → re-check clean. This is the ≤2:30 demo cut.
+`docs/demo-redteam-marker97.mp4` — recorded run on the 8-variant build:
+opaque-looking marker-97 demo → all globals read nothing → `region-stretch`
+recovers phone+SSN → grade C → first Fix peels a deeper residual (still C —
+the iterate-until-clean moment) → second Fix → grade A + "no tested attack
+recovered a supported pattern — residual uncertainty". This is the current
+≤2:30 demo cut.
+SHA-256: `0134e5b956f8917f40bf86c36f1bdcd37f9c1c870f22b44f16bc665081f8f1d8`
+
+`docs/demo-redteam-final.mp4` — prior take on the 55%-marker build.
+Superseded by the marker-97 recording above; kept for comparison only.
 SHA-256: `7ba538138105a8dad43890255429045c42a03a3f6c0e92c95f59327a525dda0b`
 
 `docs/demo-two-path-126s.mp4` — 126s raw take of the **pre-red-team** two-path
