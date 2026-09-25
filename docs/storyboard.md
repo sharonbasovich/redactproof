@@ -2,17 +2,17 @@
 
 Target runtime ~2:20. One continuous take; cuts marked **[CUT]** are optional
 trims. Narration is a guide, not a script. The centerpiece is the **red-team
-attack → grade → one-click fix → re-attack** loop on a file that *looks*
+attack → grade → fix → re-attack until clean** loop on a file that *looks*
 redacted.
 
 | # | Shot | Screen | Narration beat | ~Time |
 |---|------|--------|----------------|-------|
 | 1 | Cold open on landing | Two paths side by side + "100% local" pill | "Most redaction tools trust the editor. RedactProof attacks the pixels — whether it redacted the image, or some other tool did." | 0:00–0:15 |
-| 2 | Click **Try the marker-covered demo** (red-team path) | Attack spinner cycling variants (`identity → levels-stretch → … → region-stretch`) | "This screenshot was 'redacted' somewhere else — a black marker box at 97% opacity. Looks fully opaque. Everything runs locally; nothing uploads." | 0:15–0:35 |
+| 2 | Click **Try the marker-covered demo** (red-team path) | Attack spinner cycling variants (`identity → levels-stretch → … → region-stretch`) | "This screenshot was 'redacted' somewhere else — a black marker box at 97% opacity. It looks near-opaque. Everything runs locally; nothing uploads." | 0:15–0:35 |
 | 3 | **Attack results appear** | Grade **C** panel + warn banner + outlined recovered regions | "Plain OCR sees nothing — every global attack sees nothing. But a localized stretch that zooms into the marker's own pixels peels the residual it left: sensitive patterns, still recoverable. That's what you just almost shared." | 0:35–1:00 |
 | 4 | Hit list, masked text | Category/rule/confidence + attack chips (`levels-stretch`), bullets for text, reveal toggle | "Every hit names the attack that broke it. The recovered text stays masked — you can reveal it to confirm, and it never lands in the audit." **[CUT]** | 1:00–1:10 |
 | 5 | Audit card | SHA-256, grade C, engine + variants, metadata row, limitations | "The audit is deliberately narrow: the file's hash, the grade, which attacks ran, where the hits are — detected strings and even the filename are never written into it." | 1:10–1:25 |
-| 6 | Click **Fix it — burn opaque boxes & re-check** (twice) | Spinner → still C (new residual peeled) → second burn → grade **A**, fix panel before/after | "One click burns *opaque* boxes over every recovered region. Watch — the re-attack peels an even deeper residual out of the remaining bands, so we burn again until the last pass reads clean." | 1:25–1:55 |
+| 6 | Click **Fix it — burn opaque boxes & re-check** (twice) | Spinner → still C (new residual peeled) → second burn → grade **A**, fix panel before/after | "Each click burns *opaque* boxes over the recovered regions. Watch — the first re-attack peels a deeper residual out of the remaining bands, so we burn again until the last pass reads clean." | 1:25–1:55 |
 | 7 | New audit + download | "Fix provenance" row chaining the flagged hash | "And the re-check chains back to the flagged file's hash, so the audit tells the whole story." **[CUT]** | 1:55–2:05 |
 | 8 | Close | Footer disclaimer / honest-limitations | "An A means *these* attacks recovered nothing — not 'safe'. Names, addresses, handwriting, QR codes aren't covered — mask those yourself. Redact it. Then prove you checked." | 2:05–2:20 |
 
@@ -24,10 +24,10 @@ redacted.
   region before the grade reads out.
 - The hero fixture is `fixtures/redteam/marker-97.png` (served as
   `public/demo-redteam.png`): a synthetic support screenshot under a ~97%
-  black marker — visually opaque. Measured behavior in
+  black marker — near-opaque on screen. Measured behavior in
   `tests/redteam.test.ts`: identity + all seven global variants recover
   nothing; `region-stretch` recovers phone + SSN (partial — honestly
-  incomplete) → grade **C**. Opaque-burned export → grade **A**.
+  incomplete) → grade **C**. Two opaque-burn passes → grade **A**.
 - Say "the localized stretch partially recovered the marker's residual" —
   never "we cracked it completely": two of six categories come back, the
   rest stay lost. Partial recovery is itself the demo point.
@@ -45,7 +45,7 @@ redacted.
 ## Demo candidate
 
 `docs/demo-redteam-marker97.mp4` — recorded run on the 8-variant build:
-opaque-looking marker-97 demo → all globals read nothing → `region-stretch`
+near-opaque marker-97 demo → all globals read nothing → `region-stretch`
 recovers phone+SSN → grade C → first Fix peels a deeper residual (still C —
 the iterate-until-clean moment) → second Fix → grade A + "no tested attack
 recovered a supported pattern — residual uncertainty". This is the current

@@ -13,7 +13,9 @@ you share the image.
 It also works as a **last-mile red-team check for images redacted anywhere
 else**: the *Red-team an existing image* path attacks the actual file you're
 about to share — not the editing session — so a white-out highlight that only
-*looks* opaque still gets caught, and a one-click opaque burn fixes it.
+*looks* nearly opaque can still leak. RedactProof exposes supported patterns
+that remain recoverable and lets you burn the flagged regions, then re-check
+and repeat until no tested attack finds another hit.
 
 Built for the **InfinityX Global Hackathon 2K26**.
 
@@ -167,11 +169,11 @@ specimen, the phone number is a reserved 555 range, the IP is TEST-NET-3, and
 the emails use example.com. No real personal data is used anywhere.
 
 `fixtures/redteam/marker-97.png` / `public/demo-redteam.png` is the red-team
-demo: a screenshot covered by a ~97%-opacity black marker — it *looks fully
-opaque*, plain OCR and every global attack read nothing, but `region-stretch`
+demo: a screenshot covered by a ~97%-opacity black marker — it looks
+near-opaque, plain OCR and every global attack read nothing, but `region-stretch`
 recovers part of what the marker leaked (phone + SSN in the measured run —
-partial recovery, honestly graded). The expected flow is grade **C** →
-**Fix it** → re-attack grades **A** on the burned export.
+partial recovery, honestly graded). The measured flow takes two fix passes:
+grade **C** → **Fix it** → **C** (new residual hits) → **Fix it** → **A**.
 `fixtures/redteam/` also holds `marker-55`, `marker-75`, `marker-99`
 (the limit case), `marker-yellow`, `marker-opaque` (the control), `blur`,
 `pixelate` and `clean`.

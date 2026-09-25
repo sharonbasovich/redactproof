@@ -828,7 +828,7 @@ async function stripMetadata() {
 }
 
 /**
- * One-click fix: burn opaque boxes over every flagged region, then run the
+ * One fix pass: burn opaque boxes over every flagged region, then run the
  * whole red-team attack pass again on the FIXED pixels — the new audit carries
  * fix provenance back to the flagged file's hash.
  */
