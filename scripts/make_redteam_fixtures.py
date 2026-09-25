@@ -11,6 +11,8 @@ PII lines so tests can measure what each attack actually recovers:
   clean.png            no redaction (identity pass should find everything)
   marker-55.png        translucent black marker at ~55% opacity
   marker-75.png        translucent black marker at ~75% opacity
+  marker-97.png        marker at ~97% opacity — looks opaque, ~3% residual
+  marker-99.png        marker at ~99% opacity — ~1% residual (limit case)
   marker-opaque.png    opaque black boxes (control: nothing recoverable)
   marker-yellow.png    solid yellow highlighter blocks
   blur.png             gaussian blur over PII lines
@@ -127,6 +129,8 @@ def main() -> None:
     save(base(), "clean.png")
     save(translucent_marker(base(), 140), "marker-55.png")
     save(translucent_marker(base(), 190), "marker-75.png")
+    save(translucent_marker(base(), 248), "marker-97.png")
+    save(translucent_marker(base(), 252), "marker-99.png")
     save(opaque_marker(base()), "marker-opaque.png")
     save(yellow_marker(base()), "marker-yellow.png")
     save(blur_regions(base(), 4), "blur.png")

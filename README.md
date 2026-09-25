@@ -43,9 +43,13 @@ extension)? Drop the **final file** and let the attack engine try to break
 its cover-up:
 
 1. The uploaded bytes are hashed (SHA-256), checked for residual container
-   metadata (EXIF/GPS/XMP/PNG text chunks), and rasterized; up to 7 attack
+   metadata (EXIF/GPS/XMP/PNG text chunks), and rasterized; up to 8 attack
    variants (`identity`, `levels-stretch`, `gamma-lift`, `gamma-drop`,
-   `invert`, `channel-max`, `upscale-sharpen`) each get an OCR pass, locally.
+   `invert`, `channel-max`, `upscale-sharpen`, `region-stretch`) each get an
+   OCR pass, locally. `region-stretch` is the localized attack: it finds
+   areas that look like cover-ups (`findCandidateRegions`) and stretches each
+   region's own luminance histogram — a near-opaque marker that defeats
+   every global transform can still leak its residual that way.
 2. Hits are deduplicated across variants and carry attack provenance — which
    variant(s) recovered the region. Recovered text is shown **masked by
    default** with a click-to-reveal; it never enters the audit.
@@ -110,7 +114,7 @@ src/
   verify.ts   independent-verifier report builder + cross-attack hit dedupe,
               hit-bbox padding for the opaque fix
   redteam/    attack engine (merged from codex/redactproof-redteam-*):
-              types.ts (Raster/AttackId/contracts), attack.ts (7 variants,
+              types.ts (Raster/AttackId/contracts), attack.ts (8 variants,
               runAttacks, cross-variant dedupe), grade.ts (A/B/C/F grading),
               canvas.ts (raster <-> canvas/pngjs bridge), analyze.ts
               (redaction-region classification), metadata.ts (EXIF/GPS/XMP/
@@ -155,13 +159,15 @@ the card numbers are published test PANs, the SSN is the historical Woolworth
 specimen, the phone number is a reserved 555 range, the IP is TEST-NET-3, and
 the emails use example.com. No real personal data is used anywhere.
 
-`fixtures/redteam/marker-55.png` / `public/demo-redteam.png` is the red-team
-demo: a screenshot covered by a 55%-opacity black marker — it *looks*
-redacted, plain OCR reads nothing, but the `levels-stretch` attack recovers
-5+ supported categories (measured in `tests/redteam.test.ts`). The expected
-flow is grade **C** → **Fix it** → re-attack grades **A** on the burned
-export. `fixtures/redteam/` also holds `marker-75`, `marker-yellow`,
-`marker-opaque` (the control), `blur`, `pixelate` and `clean`.
+`fixtures/redteam/marker-97.png` / `public/demo-redteam.png` is the red-team
+demo: a screenshot covered by a ~97%-opacity black marker — it *looks fully
+opaque*, plain OCR and every global attack read nothing, but `region-stretch`
+recovers part of what the marker leaked (phone + SSN in the measured run —
+partial recovery, honestly graded). The expected flow is grade **C** →
+**Fix it** → re-attack grades **A** on the burned export.
+`fixtures/redteam/` also holds `marker-55`, `marker-75`, `marker-99`
+(the limit case), `marker-yellow`, `marker-opaque` (the control), `blur`,
+`pixelate` and `clean`.
 
 ## License
 

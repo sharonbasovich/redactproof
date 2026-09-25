@@ -24,6 +24,11 @@ export interface Raster {
  * - `channel-max`       per-pixel max(R,G,B) — defeats single-channel colored
  *                       markers/highlights
  * - `upscale-sharpen`   2x upscale + unsharp mask for faint/small text
+ * - `region-stretch`    localized recovery: redaction-looking regions are
+ *                       auto-discovered (findCandidateRegions) and each gets
+ *                       its own high-pass stretch — near-opaque (97%+)
+ *                       markers that defeat every global transform leave a
+ *                       1-3% residual the local histogram can still peel
  */
 export type AttackId =
   | "identity"
@@ -32,7 +37,8 @@ export type AttackId =
   | "gamma-drop"
   | "invert"
   | "channel-max"
-  | "upscale-sharpen";
+  | "upscale-sharpen"
+  | "region-stretch";
 
 export const ATTACK_IDS: readonly AttackId[] = [
   "identity",
@@ -42,6 +48,7 @@ export const ATTACK_IDS: readonly AttackId[] = [
   "invert",
   "channel-max",
   "upscale-sharpen",
+  "region-stretch",
 ];
 
 /** One transformed image produced by an attack pass. */
